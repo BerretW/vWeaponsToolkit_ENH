@@ -1420,10 +1420,15 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 			"choose gen8 or gen9 and save a .ytd. Names come from PNG file names. "
 			"This does not yet convert GLB geometry.\n\n"
 			"Import GLB: use the button on the first tab or Tools > Import GLB / open preparation project. "
-			"Inspect the model, press Next to assign object roles, then Next to review the included assembly. "
+			"Inspect the model, assign object roles, then align the model and prepare pivots before Review. "
 			"Every object needs a role or explicit exclusion; at least one must be Body. "
+			"Alignment: Apply scale/rotation/source anchor/output offset, then Confirm alignment. "
+			"Object pivot: select a part, set its pivot and unit axis, then confirm. "
+			"Right-click the preview to pick a point for the active alignment/pivot tab. "
+			"Temporary rotation/slide tests are not saved; reset them before picking points. "
 			"Save project stores a resumable .vwtimport.xml (drafts allowed), not game assets. "
-			"Open that project through the same Import GLB button. Changed source GLBs are rejected by SHA-256. "
+			"Version-1 projects keep their roles and need alignment/pivot confirmation; new saves use version 2. "
+			"Open through the same Import GLB button. Changed source GLBs are rejected by SHA-256. "
 			"Rigging/material conversion/resource export are not connected yet. "
 			"See MODEL_IMPORT.md next to the executable for preparation details.",
 			"vWeaponsToolkit - How to use", wxOK | wxICON_INFORMATION, this);

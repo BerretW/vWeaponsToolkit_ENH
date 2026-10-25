@@ -1,7 +1,7 @@
 # Weapon GLB source structure
 
 This is the proposed authoring contract for the GLB-to-weapon workflow.
-**Static inspection, part-role assignment and resumable import projects are
+**Static inspection, part-role assignment, alignment/pivot preparation and resumable import projects are
 implemented; game conversion is not.** The names below
 describe authoring roles, not GTA bone names or an implemented automatic
 component exporter. Keep the original authoring file for later rigging.
@@ -71,8 +71,10 @@ under another node can have a different role.
   right-handed **Z up** using `(x, y, z) -> (x, -z, y)`.
 - For a consistent proposed source convention, point the barrel along
   **glTF -Z**; it then points along **+Y** in the imported Z-up view.
-  Final game alignment must be checked against the selected weapon
-  template's rig; there is no automatic grip/alignment calibration yet.
+  The new alignment step can rotate this to **+X**, the muzzle direction
+  in the supplied carbine reference. Select the actual source barrel axis
+  in the yaw preset; the application does not detect it automatically.
+  Final alignment still needs checking against the selected weapon rig.
 - Place the root origin deliberately near the grip/template origin.
   The importer does **not** centre, rescale or ground the weapon silently.
   The camera centres only the view, not the imported geometry.
@@ -140,6 +142,54 @@ under another node can have a different role.
 The default scene is used. If several scenes exist without a default,
 the first scene is used with a visible warning.
 
+## Alignment and pivot preparation
+
+After assigning roles, press **Next: align model**. All placement fields
+use the importer's **Z-up metres**, not Blender's pre-export local axes.
+
+- **Uniform scale:** positive, 0.0001..10000. Typical corrections are 0.01
+  for centimetres or 0.001 for millimetres. No implicit resizing occurs.
+- **Rotation XYZ:** degrees, each -360..360. Applied in X, then Y, then Z
+  order. The yaw preset replaces these rotations; it preserves anchor/offset.
+- **Source anchor:** a point in the original imported assembly that should
+  map to the output offset. Right-click the model with the Model alignment
+  tab active to choose a surface point, or enter XYZ explicitly.
+- **Output offset:** position of that anchor in output coordinates.
+  Thus output = offset + Rz*Ry*Rx*(scale*(source-anchor)).
+- **Confirm alignment:** required before review, including when identity
+  is the correct transform. Editing transform values clears confirmation.
+- **Object pivot / test motion:** select a source object from the left,
+  set a source-space pivot and a unit axis, then **Apply / confirm pivot**.
+  Right-click with this tab active to choose its pivot. XYZ axis presets
+  help; custom negative/diagonal unit axes can be entered numerically.
+
+Magazine, bolt, trigger, charging handle and other-moving-part roles require
+confirmed pivots. Body/fixed detail does not need an independent pivot.
+Optional component attachment rigging is a later step. All primitives of
+one object share their pivot; another instance of a mesh remains independent.
+Changing a role invalidates that object's pivot confirmation.
+
+**Use source object origin** is an explicit starting-point reset, not
+automatic calibration. In the supplied M4A1 all node transforms are identity;
+this means their source origins coincide, not that all hinges are at zero.
+Do not confirm those origins blindly. Surface picking can seed a pivot,
+but an actual hinge may require numeric adjustments inside the geometry.
+
+The overlay shows output X/Y/Z in red/green/blue and the selected pivot's
+axis in yellow. Point selection uses the visible frontmost triangle. Keep
+alpha/preview limitations in mind; there is no alpha-aware picking.
+
+The temporary test slider rotates up to +/-45 degrees or slides up to
++/-45 **output millimetres** along the chosen axis. Only the selected source
+object moves. **Reset test** returns exactly to rest. Reset before picking;
+the application rejects picking from a test pose rather than storing a
+deformed point accidentally. Neither a pose nor animation keys are saved.
+All previews are rebuilt from the original vertices, so repeated edits
+do not accumulate transformations. Global normals rotate without scale.
+
+Confirmations are author decisions, **not** real GTA bone bindings or proof
+of a working reload/trigger animation.
+
 ## Later rig/component stage
 
 For a first working version, prepare a **static, assembled, unskinned**
@@ -150,23 +200,32 @@ attachment points and component definitions, then generate appropriate LODs
 and gen8/gen9 assets.
 
 Today, use **Import GLB...** on the first tab or **Tools > Import GLB / open
-preparation project...**. The three steps are:
+preparation project...**. The four steps are:
 
 1. Inspect the source.
 2. Assign every source object a role or explicitly exclude it. At least one
    must be **Body / fixed detail**. Select the planned template/model name.
-3. Review only the included assembly and save the project.
+3. Align the model and confirm moving-part/magazine pivots.
+4. Review the aligned included assembly in rest pose and save the project.
 
 You can save unfinished assignments too. **Save project...** writes
 `<name>.vwtimport.xml`, a versioned XML file referencing the GLB, its SHA-256,
-source node/primitive identities, semantic roles, model name and planned
-template. It is **not** a FiveM resource and must not go into `stream`.
+source node/primitive identities, semantic roles, model name, planned
+template, alignment and per-object pivots/axes/confirmation flags.
+It is **not** a FiveM resource and must not go into `stream`.
 Reopen it through Import GLB. Source paths are relative to the project
 folder where possible (absolute across Windows drives); moving the project
 and source together preserves that relationship. Changed GLB bytes, unknown
 roles and inconsistent/duplicate part identities are rejected, not guessed.
 The GLB itself remains untouched. Save validation failures do not truncate
 an existing project.
+
+New projects use version 2. Existing version-1 files are still accepted:
+roles/template/name are preserved, alignment starts as unconfirmed identity,
+and pivots start at unconfirmed source-world origins. Saving upgrades to
+version 2; keep a copy if you need to open it in an older toolkit build.
+Invalid scales, non-finite/out-of-range values, non-unit axes, duplicate
+alignment elements and inconsistent per-object pivots are rejected.
 
 The wizard does not alter the current weapon configuration or export files.
 Static YDR serialization

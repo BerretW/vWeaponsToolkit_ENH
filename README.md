@@ -127,15 +127,29 @@ preparation project...**:
    **Apply name suggestions** uses source node/parent names, but only after
    you request it and never overwrites manually assigned objects.
    Review every suggestion; unknown objects stay unassigned.
-3. Press **Next: review**. All objects must be assigned or excluded, with at
-   least one Body. The review shows the included assembly (without excluded
-   parts), object-role counts, size in metres and remaining conversion work.
-   **Back** preserves the assignments.
-4. **Save project...** stores a draft or completed mapping as
+3. Press **Next: align model**. Adjust positive uniform scale, rotation XYZ,
+   source anchor and output offset. Use **Apply placement** to preview edits
+   and **Confirm alignment** once correct (even when identity is correct).
+   The yaw preset turns a manually selected source barrel axis towards +X,
+   matching the supplied carbine reference, not an automatically detected rig.
+   In **Object pivot / test motion**, select an included object on the left,
+   set its source-space pivot and unit hinge/slide axis, then confirm it.
+   Right-click a visible surface in the preview to pick the source anchor
+   or selected pivot, depending on the active tab. Numeric edits allow
+   points inside/off the surface. Rotate/slide testing is temporary; reset
+   it before picking. Magazine/bolt/trigger/charging-handle/other-moving-part
+   objects require pivot confirmation before review.
+4. Press **Next: review**. The review shows the aligned included assembly
+   in rest pose, object-role counts, size in metres and remaining work.
+   **Back** preserves roles, transforms and pivots.
+5. **Save project...** stores a draft or completed preparation as
    `<name>.vwtimport.xml`. Keep this filename suffix. Reopen it through the
    same Import GLB button. The project references the original GLB and
    checks its SHA-256; it does not embed or modify the model. Keep the source
    GLB with the project. A re-exported/changed GLB needs a new import.
+   New saves use project version 2. Version-1 projects retain their roles
+   and load with identity alignment and unconfirmed source-origin pivots;
+   no calibration is invented. Re-saving upgrades them to version 2.
 
 Your existing weapon configuration and `.ydr/.ytd` export are not changed.
 Closing a changed project asks whether to save it.
@@ -151,6 +165,9 @@ Unsupported inputs fail with a diagnostic rather than dropping meshes.
 automatic PBR-to-GTA material conversion, rigging or component generation.
 Saved roles are semantic authoring roles, not actual GTA bone assignments.
 The planned template is recorded in the project, not applied as a rig.
+Placement is non-destructive: output = offset + Rz*Ry*Rx*(scale*(source-anchor)).
+Original GLB vertices are never overwritten, and test poses are never saved.
+Confirmations record your authoring decisions, not in-game verification.
 The preview is base-color/basic lighting only, not PBR/alpha rendering.
 See [MODEL_IMPORT.md](MODEL_IMPORT.md) for limits and the proposed authoring
 hierarchy: fixed body together, moving parts and removable components
@@ -198,7 +215,10 @@ selection, flat-normal generation, Unicode paths and malformed/unsupported
 inputs. Project tests cover drafts/completed mappings, relative/Unicode paths,
 source SHA-256, malformed XML/roles/identity, failed-save preservation,
 grouping an object's material primitives, excluded assembly geometry and
-the actual modal wizard's Next/role selection/Review/Back event handlers.
+the actual modal wizard's Next/role selection/right-click picking/alignment/
+pivot confirmation/motion/Review/Back event handlers. Placement tests check
+rotation order, inverse coordinate conversion, physical slide distances,
+normals, excluded/unchanged objects, rest-pose reset and version-1 migration.
 When `test\m4a1.glb` is present, it is tested read-only, including hierarchy
 role suggestions and project round trips; this optional user fixture is not
 required on a clean checkout. Own-dialog screenshots are written to the

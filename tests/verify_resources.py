@@ -404,23 +404,56 @@ class WriterTests(unittest.TestCase):
             with self.subTest(project=filename):
                 root = ET.parse(path).getroot()
                 self.assertEqual(root.tag, "glb-import")
-                self.assertEqual(root.attrib["version"], "1")
+                self.assertEqual(root.attrib["version"], "2")
                 self.assertEqual(root.attrib["template"], "WEAPON_CARBINERIFLE")
                 source = (path.parent / root.attrib["source"]).resolve()
                 if not source.exists() and filename.startswith("m4a1"):
                     continue
                 raw = source.read_bytes()
                 self.assertEqual(hashlib.sha256(raw).hexdigest(), root.attrib["sha256"])
-                parts = list(root)
+                alignment = root.findall("alignment")
+                self.assertEqual(len(alignment), 1)
+                self.assertEqual(float(alignment[0].attrib["scale"]), 1)
+                self.assertEqual(alignment[0].attrib["confirmed"], "0")
+                parts = root.findall("part")
                 self.assertEqual([int(p.attrib["index"]) for p in parts], list(range(len(parts))))
                 identities = [(int(p.attrib["node"]), int(p.attrib["primitive"])) for p in parts]
                 self.assertEqual(len(set(identities)), len(parts))
                 self.assertTrue(all(p.tag == "part" for p in parts))
+                for part in parts:
+                    self.assertEqual(part.attrib["confirmed"], "0")
+                    axis = [float(part.attrib[f"axis-{c}"]) for c in "xyz"]
+                    self.assertAlmostEqual(sum(c*c for c in axis), 1)
                 self.assertIn("body", [p.attrib["role"] for p in parts])
                 if filename == "mapping.vwtimport.xml":
                     self.assertEqual([p.attrib["role"] for p in parts], ["body", "excluded"])
                 else:
                     self.assertEqual(len(parts), 15)
+
+    def test_placement_projects(self):
+        path = OUTPUT / "placement.vwtimport.xml"
+        root = ET.parse(path).getroot()
+        a = root.find("alignment").attrib
+        self.assertEqual(root.attrib["version"], "2")
+        self.assertEqual(float(a["scale"]), 2)
+        self.assertEqual([float(a[f"rotation-{c}"]) for c in "xyz"], [0, 0, 90])
+        origin = [float(a[f"origin-{c}"]) for c in "xyz"]
+        offset = [float(a[f"offset-{c}"]) for c in "xyz"]
+        self.assertEqual(origin, [11, -33, 22])
+        self.assertEqual(offset, [1, 2, 3])
+        # Compute Rz*Ry*Rx independently of the native implementation.
+        point = [9, -33, 22]
+        p = [(point[i]-origin[i])*float(a["scale"]) for i in range(3)]
+        rx, ry, rz = [math.radians(float(a[f"rotation-{c}"])) for c in "xyz"]
+        p = [p[0], math.cos(rx)*p[1]-math.sin(rx)*p[2], math.sin(rx)*p[1]+math.cos(rx)*p[2]]
+        p = [math.cos(ry)*p[0]+math.sin(ry)*p[2], p[1], -math.sin(ry)*p[0]+math.cos(ry)*p[2]]
+        p = [math.cos(rz)*p[0]-math.sin(rz)*p[1], math.sin(rz)*p[0]+math.cos(rz)*p[1], p[2]]
+        for actual, expected in zip([p[i]+offset[i] for i in range(3)], [1, -2, 3]):
+            self.assertAlmostEqual(actual, expected)
+        legacy = ET.parse(OUTPUT / "legacy.vwtimport.xml").getroot()
+        self.assertEqual(legacy.attrib["version"], "2")
+        self.assertEqual(legacy.find("alignment").attrib["confirmed"], "0")
+        self.assertEqual([p.attrib["role"] for p in legacy.findall("part")], ["body", "excluded"])
 
     def test_written_drawables(self):
         # The supplied shader provides an independent reference for the gen9 binding table.

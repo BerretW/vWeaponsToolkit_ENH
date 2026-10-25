@@ -14,6 +14,7 @@
 
 void testGlbImporter(const wxString& output);
 void testGlbImportProjects(const wxString& repo, const wxString& output);
+void testGlbPlacement(const wxString& output);
 
 class ResourceWriterTestApp : public wxApp
 {
@@ -225,6 +226,7 @@ int main(int argc, char** argv)
 		testDrawableWriter(output);
 		testGlbImporter(output);
 		testGlbImportProjects(repo, output);
+		testGlbPlacement(output);
 		testContainer(64, 0, path("system_only.rsc"));
 		testContainer(8192, 8193, path("page_growth.rsc"));
 		testContainer(48, 16 * 1024 * 1024 + 1, path("large_page.rsc"));

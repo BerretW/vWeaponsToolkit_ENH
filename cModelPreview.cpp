@@ -9,6 +9,7 @@
 #include <fstream>
 #include <map>
 #include <stdexcept>
+#include <limits>
 
 namespace
 {
@@ -639,6 +640,63 @@ bool loadPreviewModel(const std::string& ydrPath, const std::vector<std::string>
 
 // ---------- software renderer ----------
 
+namespace
+{
+	struct PreviewCamera
+	{
+		float center[3], scale, cy, sy, cp, sp;
+		int width, height;
+		PreviewCamera(const PreviewModel& m, int w, int h, float yaw, float pitch, float zoom) : width(w), height(h)
+		{
+			float radius = 0;
+			for (unsigned k = 0; k < 3; ++k)
+			{
+				center[k] = (m.bmin[k]+m.bmax[k])*0.5f;
+				const float extent = (m.bmax[k]-m.bmin[k])*0.5f; radius += extent*extent;
+			}
+			scale = std::min(w,h)*0.5f/std::max(std::sqrt(radius), 1e-4f)*0.95f*zoom;
+			cy = std::cos(yaw); sy = std::sin(yaw); cp = std::cos(pitch); sp = std::sin(pitch);
+		}
+		void rotate(float x, float y, float z, float* out) const
+		{
+			const float a = x*cy-y*sy, b = x*sy+y*cy;
+			out[0] = a; out[1] = b*cp-z*sp; out[2] = b*sp+z*cp;
+		}
+		std::array<float, 3> project(const float* point) const
+		{
+			float r[3];
+			rotate(point[0]-center[0], point[1]-center[1], point[2]-center[2], r);
+			return {width*0.5f+r[0]*scale, height*0.5f-r[2]*scale, r[1]};
+		}
+	};
+}
+
+bool pickPreviewSurface(const PreviewModel& model, int width, int height, float yaw, float pitch,
+	float zoom, const wxPoint& pixel, std::array<float, 3>& point)
+{
+	if (width < 8 || height < 8 || !std::isfinite(yaw) || !std::isfinite(pitch) || !std::isfinite(zoom) || zoom <= 0)
+		throw std::invalid_argument("Invalid preview picking camera.");
+	const PreviewCamera camera(model, width, height, yaw, pitch, zoom);
+	float nearest = std::numeric_limits<float>::max();
+	bool found = false;
+	for (const auto& mesh : model.meshes)
+		for (size_t i = 0; i+2 < mesh.idx.size(); i += 3)
+		{
+			const float* v[3] = {&mesh.pos.at(mesh.idx[i]*3), &mesh.pos.at(mesh.idx[i+1]*3), &mesh.pos.at(mesh.idx[i+2]*3)};
+			const auto a = camera.project(v[0]), b = camera.project(v[1]), c = camera.project(v[2]);
+			const float area = (b[0]-a[0])*(c[1]-a[1])-(c[0]-a[0])*(b[1]-a[1]);
+			if (std::fabs(area) < 1e-6f) continue;
+			const float x = pixel.x+0.5f, y = pixel.y+0.5f;
+			const float w0 = ((b[0]-x)*(c[1]-y)-(c[0]-x)*(b[1]-y))/area;
+			const float w1 = ((c[0]-x)*(a[1]-y)-(a[0]-x)*(c[1]-y))/area, w2 = 1-w0-w1;
+			const float depth = w0*a[2]+w1*b[2]+w2*c[2];
+			if (w0 < 0 || w1 < 0 || w2 < 0 || depth >= nearest) continue;
+			nearest = depth; found = true;
+			for (unsigned k = 0; k < 3; ++k) point[k] = w0*v[0][k]+w1*v[1][k]+w2*v[2][k];
+		}
+	return found;
+}
+
 static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float pitch, float zoom)
 {
 	wxImage img(W, H, false);
@@ -649,17 +707,10 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 		for (int x = 0; x < W; x++) { uint8_t* p = out + ((size_t)y * W + x) * 3; p[0] = g; p[1] = g; p[2] = (uint8_t)(g + 8); }
 	}
 
-	float c[3], radius = 0;
-	for (int k = 0; k < 3; k++) c[k] = (m.bmin[k] + m.bmax[k]) * 0.5f;
-	for (int k = 0; k < 3; k++) { float e = (m.bmax[k] - m.bmin[k]) * 0.5f; radius += e * e; }
-	radius = std::max(std::sqrt(radius), 1e-4f);
-	float scale = std::min(W, H) * 0.5f / radius * 0.95f * zoom;
-
-	float cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+	const PreviewCamera camera(m, W, H, yaw, pitch, zoom);
 	auto rot = [&](float x, float y, float z, float* o)
 	{
-		float x1 = x * cy - y * sy, y1 = x * sy + y * cy;
-		o[0] = x1; o[1] = y1 * cp - z * sp; o[2] = y1 * sp + z * cp;
+		camera.rotate(x, y, z, o);
 	};
 
 	std::vector<float> zbuf((size_t)W * H, 1e30f);
@@ -671,11 +722,8 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 		std::vector<float> sx(vc), sy2(vc), sz(vc), nrm(vc * 3);
 		for (size_t v = 0; v < vc; v++)
 		{
-			float r[3];
-			rot(mesh.pos[v * 3] - c[0], mesh.pos[v * 3 + 1] - c[1], mesh.pos[v * 3 + 2] - c[2], r);
-			sx[v] = W * 0.5f + r[0] * scale;
-			sy2[v] = H * 0.5f - r[2] * scale;
-			sz[v] = r[1];
+			const auto p = camera.project(&mesh.pos[v*3]);
+			sx[v] = p[0]; sy2[v] = p[1]; sz[v] = p[2];
 			if (!mesh.nrm.empty()) rot(mesh.nrm[v * 3], mesh.nrm[v * 3 + 1], mesh.nrm[v * 3 + 2], &nrm[v * 3]);
 		}
 		const PreviewTexture* tex = (mesh.texture >= 0 && mesh.texture < (int)m.textures.size()) ? &m.textures[mesh.texture] : nullptr;
@@ -764,6 +812,7 @@ cModelPreviewPanel::cModelPreviewPanel(wxWindow* parent, const wxPoint& pos, con
 	Bind(wxEVT_MOTION, &cModelPreviewPanel::onMouse, this);
 	Bind(wxEVT_MOUSEWHEEL, &cModelPreviewPanel::onMouse, this);
 	Bind(wxEVT_LEFT_DCLICK, &cModelPreviewPanel::onMouse, this);
+	Bind(wxEVT_RIGHT_UP, &cModelPreviewPanel::onPick, this);
 }
 
 void cModelPreviewPanel::showModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths)
@@ -778,17 +827,41 @@ void cModelPreviewPanel::showModel(const std::string& ydrPath, const std::vector
 	showModel(std::move(loaded));
 }
 
-void cModelPreviewPanel::showModel(PreviewModel loaded)
+void cModelPreviewPanel::showModel(PreviewModel loaded, bool preserveView)
 {
+	const bool reset = !preserveView || !hasModel;
 	model = std::move(loaded);
 	hasModel = true;
-	float ex = model.bmax[0] - model.bmin[0], ey = model.bmax[1] - model.bmin[1];
-	baseYaw = (ey > ex) ? 1.5707963f : 0.0f;
-	yaw = 0.35f;
-	pitch = 0.2f;
-	zoom = 1.0f;
+	if (reset)
+	{
+		float ex = model.bmax[0] - model.bmin[0], ey = model.bmax[1] - model.bmin[1];
+		baseYaw = (ey > ex) ? 1.5707963f : 0.0f;
+		yaw = 0.35f; pitch = 0.2f; zoom = 1.0f;
+	}
 	message = wxString(model.info);
 	render();
+}
+
+void cModelPreviewPanel::setPointPickedHandler(std::function<void(const std::array<float, 3>&)> handler)
+{
+	pointPicked = std::move(handler);
+}
+
+void cModelPreviewPanel::onPick(wxMouseEvent& evt)
+{
+	if (!pointPicked || !hasModel) return;
+	try
+	{
+		std::array<float, 3> point;
+		const auto size = GetClientSize();
+		if (!pickPreviewSurface(model, size.x, size.y, baseYaw+yaw, pitch, zoom, evt.GetPosition(), point))
+			throw std::runtime_error("No model surface under the cursor. Click a visible surface or enter coordinates.");
+		pointPicked(point);
+	}
+	catch (const std::exception& error)
+	{
+		wxMessageBox(wxString::FromUTF8(error.what()), "Point selection failed", wxOK | wxICON_WARNING, this);
+	}
 }
 
 void cModelPreviewPanel::clearModel(const wxString& msg)
@@ -841,6 +914,34 @@ void cModelPreviewPanel::onPaint(wxPaintEvent&)
 	dc.SetBackground(wxBrush(wxColour(55, 55, 62)));
 	dc.Clear();
 	if (hasModel && bitmap.IsOk()) dc.DrawBitmap(bitmap, 0, 0);
+	if (hasModel && !model.markers.empty())
+	{
+		const auto size = GetClientSize();
+		const PreviewCamera camera(model, size.x, size.y, baseYaw+yaw, pitch, zoom);
+		for (const auto& marker : model.markers)
+		{
+			const auto p = camera.project(marker.position.data());
+			if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || p[0] < -100 || p[1] < -100 ||
+				p[0] > size.x+100 || p[1] > size.y+100) continue;
+			const wxPoint start(int(std::lround(p[0])), int(std::lround(p[1])));
+			dc.SetPen(wxPen(wxColour(255, 215, 70), 2));
+			dc.DrawLine(start.x-5, start.y, start.x+5, start.y);
+			dc.DrawLine(start.x, start.y-5, start.x, start.y+5);
+			for (unsigned k = 0; k < (marker.axes ? 3u : 1u); ++k)
+			{
+				auto end = marker.position;
+				for (unsigned j = 0; j < 3; ++j) end[j] += 0.06f*(marker.axes ? (j == k ? 1.f : 0.f) : marker.axis[j]);
+				const auto e = camera.project(end.data());
+				const wxPoint finish(int(std::lround(e[0])), int(std::lround(e[1])));
+				const wxColour color = !marker.axes ? wxColour(255, 215, 70) :
+					k == 0 ? wxColour(255, 90, 90) : k == 1 ? wxColour(90, 230, 110) : wxColour(100, 160, 255);
+				dc.SetPen(wxPen(color, 2)); dc.DrawLine(start, finish); dc.SetTextForeground(color);
+				if (marker.axes) dc.DrawText(k == 0 ? "X" : k == 1 ? "Y" : "Z", finish);
+			}
+			dc.SetTextForeground(wxColour(255, 235, 150));
+			dc.DrawText(wxString::FromUTF8(marker.label), start.x+7, start.y+5);
+		}
+	}
 	dc.SetTextForeground(wxColour(230, 230, 230));
 	wxSize s = GetClientSize();
 	if (hasModel) dc.DrawText(message, 6, s.y - 20);

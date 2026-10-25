@@ -14,6 +14,32 @@ struct GlbRoleInfo
 	const char* label;
 };
 
+struct GlbAlignment
+{
+	float scale = 1;
+	std::array<float, 3> rotationDegrees = {};
+	std::array<float, 3> origin = {};
+	std::array<float, 3> offset = {};
+	bool confirmed = false;
+};
+
+struct GlbPivot
+{
+	std::array<float, 3> position = {};
+	std::array<float, 3> axis = { 1, 0, 0 };
+	bool confirmed = false;
+};
+
+inline bool operator==(const GlbPivot& a, const GlbPivot& b)
+{
+	return a.position == b.position && a.axis == b.axis && a.confirmed == b.confirmed;
+}
+inline bool operator==(const GlbAlignment& a, const GlbAlignment& b)
+{
+	return a.scale == b.scale && a.rotationDegrees == b.rotationDegrees && a.origin == b.origin &&
+		a.offset == b.offset && a.confirmed == b.confirmed;
+}
+
 struct GlbImportProject
 {
 	wxString sourcePath;
@@ -21,6 +47,8 @@ struct GlbImportProject
 	std::string modelName;
 	std::string weaponTemplate;
 	std::vector<GlbPartRole> roles;
+	GlbAlignment alignment;
+	std::vector<GlbPivot> pivots;
 };
 
 const std::vector<GlbRoleInfo>& glbPartRoles();
@@ -30,8 +58,10 @@ std::vector<GlbPartRole> suggestGlbPartRoles(const GlbModel& model);
 void assignGlbPartRole(const GlbModel& model, GlbImportProject& project, size_t part, GlbPartRole role);
 std::vector<std::string> glbAssignmentErrors(const GlbModel& model, const GlbImportProject& project);
 std::vector<size_t> includedGlbParts(const GlbModel& model, const GlbImportProject& project);
+void assignGlbPivot(const GlbModel& model, GlbImportProject& project, size_t part, const GlbPivot& pivot);
 
 // Saves drafts too: Unassigned is retained, but cannot pass assignment validation.
-// XML is versioned and source-bound by SHA-256; changed GLBs must be imported anew.
+// Saves version 2; accepts version 1 without inventing confirmed alignment/pivots.
+// Source-bound by SHA-256; changed GLBs must be imported anew.
 void saveGlbImportProject(const wxString& path, const GlbModel& model, const GlbImportProject& project);
 GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model);

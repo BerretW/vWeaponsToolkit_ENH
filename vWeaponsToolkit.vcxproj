@@ -159,6 +159,7 @@
     <ClInclude Include="cYdrWriter.h" />
     <ClInclude Include="cGlbImporter.h" />
     <ClInclude Include="cGlbImportProject.h" />
+    <ClInclude Include="cGlbPlacement.h" />
     <ClInclude Include="cGlbImportDialog.h" />
     <ClInclude Include="third_party\cgltf.h" />
     <ClInclude Include="cWeaponComponent.h" />
@@ -175,6 +176,7 @@
     <ClCompile Include="cYdrWriter.cpp" />
     <ClCompile Include="cGlbImporter.cpp" />
     <ClCompile Include="cGlbImportProject.cpp" />
+    <ClCompile Include="cGlbPlacement.cpp" />
     <ClCompile Include="cGlbImportDialog.cpp" />
     <ClCompile Include="cWeaponComponent.cpp" />
     <ClCompile Include="cWeaponsToolkit.cpp" />

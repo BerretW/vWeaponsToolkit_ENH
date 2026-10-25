@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <array>
+#include <functional>
 
 struct PreviewTexture
 {
@@ -21,6 +23,14 @@ struct PreviewMesh
 	int texture = -1;
 };
 
+struct PreviewMarker
+{
+	std::array<float, 3> position;
+	std::array<float, 3> axis;
+	std::string label;
+	bool axes = false;
+};
+
 struct PreviewModel
 {
 	std::vector<PreviewMesh> meshes;
@@ -28,8 +38,11 @@ struct PreviewModel
 	float bmin[3] = { 0, 0, 0 };
 	float bmax[3] = { 0, 0, 0 };
 	std::string info;
+	std::vector<PreviewMarker> markers;
 };
 
+bool pickPreviewSurface(const PreviewModel& model, int width, int height, float yaw, float pitch,
+	float zoom, const wxPoint& pixel, std::array<float, 3>& point);
 // Loads a legacy (gen8) or Enhanced (gen9) .ydr together with textures from the given .ytd files.
 bool loadPreviewModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths, PreviewModel& out, std::string& error);
 
@@ -39,13 +52,15 @@ public:
 	cModelPreviewPanel(wxWindow* parent, const wxPoint& pos, const wxSize& size);
 
 	void showModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths);
-	void showModel(PreviewModel loaded);
+	void showModel(PreviewModel loaded, bool preserveView = false);
+	void setPointPickedHandler(std::function<void(const std::array<float, 3>&)> handler);
 	void clearModel(const wxString& message);
 
 private:
 	void onPaint(wxPaintEvent& evt);
 	void onSize(wxSizeEvent& evt);
 	void onMouse(wxMouseEvent& evt);
+	void onPick(wxMouseEvent& evt);
 	void render();
 
 	PreviewModel model;
@@ -57,4 +72,5 @@ private:
 	float zoom = 1.0f;
 	float baseYaw = 0.0f;
 	wxPoint lastMouse;
+	std::function<void(const std::array<float, 3>&)> pointPicked;
 };

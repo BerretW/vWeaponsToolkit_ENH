@@ -41,11 +41,13 @@
     <ClCompile Include="ResourceWriterTests.cpp" />
     <ClCompile Include="GlbImporterTests.cpp" />
     <ClCompile Include="GlbImportProjectTests.cpp" />
+    <ClCompile Include="GlbPlacementTests.cpp" />
     <ClCompile Include="..\cRscWriter.cpp" />
     <ClCompile Include="..\cYtdWriter.cpp" />
     <ClCompile Include="..\cYdrWriter.cpp" />
     <ClCompile Include="..\cGlbImporter.cpp" />
     <ClCompile Include="..\cGlbImportProject.cpp" />
+    <ClCompile Include="..\cGlbPlacement.cpp" />
     <ClCompile Include="..\cGlbImportDialog.cpp" />
     <ClCompile Include="..\cModelPreview.cpp" />
   </ItemGroup>

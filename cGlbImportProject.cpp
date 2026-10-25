@@ -2,11 +2,16 @@
 #include <wx/file.h>
 #include <wx/filename.h>
 #include "cGlbImportProject.h"
+#include "cGlbPlacement.h"
 #include "cRscWriter.h"
 #include "vendor/rapidxml/rapidxml_ext.h"
 #include <algorithm>
 #include <map>
 #include <set>
+#include <sstream>
+#include <iomanip>
+#include <limits>
+#include <locale>
 
 namespace
 {
@@ -18,7 +23,10 @@ namespace
 			fail("Source GLB SHA-256 differs; reimport the changed source instead of reusing old assignments.");
 		if (project.roles.size() != model.parts.size() || project.roles.empty() || project.roles.size() > 128)
 			fail("Part count does not match the source.");
+		if (project.pivots.size() != model.parts.size()) fail("Pivot count does not match the source.");
+		validateGlbPlacement(project);
 		std::map<size_t, GlbPartRole> nodes;
+		std::map<size_t, GlbPivot> pivots;
 		for (size_t i = 0; i < project.roles.size(); ++i)
 		{
 			glbPartRoleInfo(project.roles[i]);
@@ -27,6 +35,12 @@ namespace
 			if (found != nodes.end() && found->second != project.roles[i])
 				fail("All material primitives of one source object must share a role.");
 			nodes[node] = project.roles[i];
+			const auto& pivot = project.pivots[i];
+			const auto previous = pivots.find(node);
+			if (previous != pivots.end() && (previous->second.position != pivot.position ||
+				previous->second.axis != pivot.axis || previous->second.confirmed != pivot.confirmed))
+				fail("All material primitives of one source object must share a pivot.");
+			pivots[node] = pivot;
 		}
 	}
 	void metadata(const GlbImportProject& project)
@@ -91,6 +105,53 @@ namespace
 		for (char c : text) result = result*10 + size_t(c-'0');
 		return result;
 	}
+	std::string decimal(float value)
+	{
+		std::ostringstream out;
+		out.imbue(std::locale::classic());
+		out << std::setprecision(std::numeric_limits<float>::max_digits10) << value;
+		return out.str();
+	}
+	float scalar(Node* node, const char* key)
+	{
+		std::istringstream in(attr(node, key));
+		in.imbue(std::locale::classic());
+		float value;
+		if (!(in >> value)) fail(std::string("Invalid numeric attribute: ") + key);
+		in >> std::ws;
+		if (!in.eof()) fail(std::string("Invalid numeric attribute: ") + key);
+		return value;
+	}
+	bool flag(Node* node, const char* key)
+	{
+		const auto value = attr(node, key);
+		if (value != "0" && value != "1") fail(std::string("Expected 0 or 1 for: ") + key);
+		return value == "1";
+	}
+	void vector(Document& doc, Node* node, const char* prefix, const std::array<float, 3>& value)
+	{
+		for (unsigned k = 0; k < 3; ++k)
+		{
+			const std::string key = std::string(prefix) + "xyz"[k];
+			add(doc, node, doc.allocate_string(key.c_str()), decimal(value[k]));
+		}
+	}
+	std::array<float, 3> vector(Node* node, const char* prefix)
+	{
+		std::array<float, 3> value;
+		for (unsigned k = 0; k < 3; ++k)
+		{
+			const std::string key = std::string(prefix) + "xyz"[k];
+			value[k] = scalar(node, key.c_str());
+		}
+		return value;
+	}
+	GlbPivot sourcePivot(const GlbPart& part)
+	{
+		GlbPivot pivot;
+		pivot.position = {part.sourceWorldTransform[12], -part.sourceWorldTransform[14], part.sourceWorldTransform[13]};
+		return pivot;
+	}
 }
 
 const std::vector<GlbRoleInfo>& glbPartRoles()
@@ -128,6 +189,7 @@ GlbImportProject createGlbImportProject(const GlbModel& model, const wxString& p
 	project.modelName = "w_ar_" + source.GetName().ToStdString();
 	project.weaponTemplate = weaponTemplate;
 	project.roles.assign(model.parts.size(), GlbPartRole::Unassigned);
+	for (const auto& part : model.parts) project.pivots.push_back(sourcePivot(part));
 	bindings(model, project);
 	return project;
 }
@@ -145,7 +207,22 @@ void assignGlbPartRole(const GlbModel& model, GlbImportProject& project, size_t 
 	glbPartRoleInfo(role);
 	if (part >= model.parts.size()) fail("Selected part is out of range.");
 	for (size_t i = 0; i < model.parts.size(); ++i)
-		if (model.parts[i].nodeIndex == model.parts[part].nodeIndex) project.roles[i] = role;
+		if (model.parts[i].nodeIndex == model.parts[part].nodeIndex)
+		{
+			if (project.roles[i] != role) project.pivots[i].confirmed = false;
+			project.roles[i] = role;
+		}
+}
+
+void assignGlbPivot(const GlbModel& model, GlbImportProject& project, size_t part, const GlbPivot& pivot)
+{
+	bindings(model, project);
+	if (part >= model.parts.size()) fail("Selected pivot part is out of range.");
+	auto candidate = project;
+	for (size_t i = 0; i < model.parts.size(); ++i)
+		if (model.parts[i].nodeIndex == model.parts[part].nodeIndex) candidate.pivots[i] = pivot;
+	bindings(model, candidate);
+	project.pivots = std::move(candidate.pivots);
 }
 
 std::vector<std::string> glbAssignmentErrors(const GlbModel& model, const GlbImportProject& project)
@@ -182,7 +259,7 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 	Document doc;
 	auto* root = doc.allocate_node(rapidxml::node_element, "glb-import");
 	doc.append_node(root);
-	add(doc, root, "version", "1");
+	add(doc, root, "version", "2");
 	wxFileName source(project.sourcePath);
 	wxFileName destination(path);
 	if (!destination.MakeAbsolute()) fail("Could not resolve project path.");
@@ -191,6 +268,13 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 	add(doc, root, "sha256", project.sourceSha256);
 	add(doc, root, "model", normalizeAssetName(project.modelName, "Model"));
 	add(doc, root, "template", project.weaponTemplate);
+	auto* alignment = doc.allocate_node(rapidxml::node_element, "alignment");
+	root->append_node(alignment);
+	add(doc, alignment, "scale", decimal(project.alignment.scale));
+	vector(doc, alignment, "rotation-", project.alignment.rotationDegrees);
+	vector(doc, alignment, "origin-", project.alignment.origin);
+	vector(doc, alignment, "offset-", project.alignment.offset);
+	add(doc, alignment, "confirmed", project.alignment.confirmed ? "1" : "0");
 	for (size_t i = 0; i < model.parts.size(); ++i)
 	{
 		auto* part = doc.allocate_node(rapidxml::node_element, "part");
@@ -199,6 +283,9 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 		add(doc, part, "node", std::to_string(model.parts[i].nodeIndex));
 		add(doc, part, "primitive", std::to_string(model.parts[i].primitiveIndex));
 		add(doc, part, "role", glbPartRoleInfo(project.roles[i]).id);
+		vector(doc, part, "pivot-", project.pivots[i].position);
+		vector(doc, part, "axis-", project.pivots[i].axis);
+		add(doc, part, "confirmed", project.pivots[i].confirmed ? "1" : "0");
 	}
 	std::string xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
 	rapidxml::print(std::back_inserter(xml), doc);
@@ -227,7 +314,8 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 	}
 	if (!root) fail("Missing glb-import root.");
 	attributes(root, {"version", "source", "sha256", "model", "template"});
-	if (attr(root, "version") != "1") fail("Unsupported import project version.");
+	const auto version = attr(root, "version");
+	if (version != "1" && version != "2") fail("Unsupported import project version.");
 	GlbImportProject project;
 	const auto sourceText = attr(root, "source");
 	wxFileName source(wxString::FromUTF8(sourceText));
@@ -240,12 +328,28 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 	project.weaponTemplate = attr(root, "template");
 	metadata(project);
 	GlbModel loaded = loadGlb(project.sourcePath);
+	bool hasAlignment = false;
 	for (auto* node = root->first_node(); node; node = node->next_sibling())
 	{
 		if (node->type() == rapidxml::node_comment) continue;
+		if (version == "2" && node->type() == rapidxml::node_element && std::string(node->name()) == "alignment")
+		{
+			if (hasAlignment || node->first_node()) fail("Expected exactly one empty alignment element.");
+			attributes(node, {"scale", "rotation-x", "rotation-y", "rotation-z", "origin-x", "origin-y", "origin-z",
+				"offset-x", "offset-y", "offset-z", "confirmed"});
+			project.alignment.scale = scalar(node, "scale");
+			project.alignment.rotationDegrees = vector(node, "rotation-");
+			project.alignment.origin = vector(node, "origin-");
+			project.alignment.offset = vector(node, "offset-");
+			project.alignment.confirmed = flag(node, "confirmed");
+			hasAlignment = true;
+			continue;
+		}
 		if (node->type() != rapidxml::node_element || std::string(node->name()) != "part" || node->first_node())
 			fail("Expected empty part elements.");
-		attributes(node, {"index", "node", "primitive", "role"});
+		if (version == "1") attributes(node, {"index", "node", "primitive", "role"});
+		else attributes(node, {"index", "node", "primitive", "role", "pivot-x", "pivot-y", "pivot-z",
+			"axis-x", "axis-y", "axis-z", "confirmed"});
 		const auto i = number(attr(node, "index"));
 		if (i != project.roles.size() || i >= loaded.parts.size() ||
 			number(attr(node, "node")) != loaded.parts[i].nodeIndex ||
@@ -256,7 +360,16 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 			[&](const GlbRoleInfo& info) { return role == info.id; });
 		if (found == glbPartRoles().end()) fail("Unknown saved part role.");
 		project.roles.push_back(found->role);
+		auto pivot = sourcePivot(loaded.parts[i]);
+		if (version == "2")
+		{
+			pivot.position = vector(node, "pivot-");
+			pivot.axis = vector(node, "axis-");
+			pivot.confirmed = flag(node, "confirmed");
+		}
+		project.pivots.push_back(pivot);
 	}
+	if (version == "2" && !hasAlignment) fail("Missing alignment element.");
 	bindings(loaded, project);
 	model = std::move(loaded);
 	return project;

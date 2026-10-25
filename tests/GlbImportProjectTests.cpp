@@ -2,10 +2,12 @@
 #include <wx/file.h>
 #include <wx/filename.h>
 #include "cGlbImportDialog.h"
+#include "cGlbPlacement.h"
 #include "cRscWriter.h"
 #include <functional>
 #include <iostream>
 #include <Windows.h>
+#include <cmath>
 
 namespace
 {
@@ -50,6 +52,13 @@ namespace
 		event.SetEventObject(control);
 		control->GetEventHandler()->ProcessEvent(event);
 	}
+	void namedButton(wxWindow* window, const char* name)
+	{
+		auto* control = wxWindow::FindWindowByName(name, window);
+		require(control && control->IsEnabled(), "Named wizard button missing/disabled.");
+		wxCommandEvent event(wxEVT_BUTTON, control->GetId());
+		control->GetEventHandler()->ProcessEvent(event);
+	}
 	void capture(wxDialog& dialog, const wxString& path)
 	{
 		wxTheApp->Yield(true);
@@ -89,6 +98,49 @@ namespace
 					list->GetItemText(2, 3) == "Exclude from weapon", "Wizard role selection.");
 				capture(dialog, wxFileName(output, "glb_assignment_ui.png").GetFullPath());
 				button(&dialog, wxID_FORWARD);
+				require(dialog.FindWindow(wxID_FORWARD)->IsEnabled(), "Alignment must be a real step before Review.");
+				auto* panel = dynamic_cast<cModelPreviewPanel*>(wxWindow::FindWindowByName("glb-preview", &dialog));
+				auto mapped = project;
+				assignGlbPartRole(model, mapped, 0, GlbPartRole::Body);
+				assignGlbPartRole(model, mapped, 1, GlbPartRole::Excluded);
+				const auto view = makePreparedGlbPreview(model, mapped);
+				const auto size = panel->GetClientSize();
+				bool picked = false;
+				wxPoint pixel;
+				std::array<float, 3> expected;
+				for (int y = 10; y < size.y-20 && !picked; y += 8)
+					for (int x = 10; x < size.x-10 && !picked; x += 8)
+					{
+						pixel = {x,y};
+						picked = pickPreviewSurface(view, size.x, size.y, .35f, .2f, 1, pixel, expected);
+					}
+				require(picked, "Could not find a visible point for the actual UI pick event.");
+				wxMouseEvent right(wxEVT_RIGHT_UP); right.SetPosition(pixel);
+				panel->GetEventHandler()->ProcessEvent(right);
+				auto* origin = dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName("glb-origin-x", &dialog));
+				double number;
+				require(origin && origin->GetValue().ToDouble(&number) && std::fabs(number-expected[0]) < 0.0001,
+					"Right-click must apply the actual picked source coordinate.");
+				list->SetItemState(1, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+				auto* tabs = dynamic_cast<wxNotebook*>(wxWindow::FindWindowByName("glb-placement-tabs", &dialog));
+				tabs->SetSelection(1);
+				auto* axisX = dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName("glb-axis-x", &dialog));
+				auto* axisZ = dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName("glb-axis-z", &dialog));
+				axisX->SetValue("0"); axisZ->SetValue("1");
+				namedButton(&dialog, "glb-confirm-pivot");
+				auto* slider = dynamic_cast<wxSlider*>(wxWindow::FindWindowByName("glb-motion", &dialog));
+				auto* status = dynamic_cast<wxStaticText*>(wxWindow::FindWindowByName("glb-placement-status", &dialog));
+				slider->SetValue(15);
+				wxCommandEvent motion(wxEVT_SLIDER, slider->GetId());
+				slider->GetEventHandler()->ProcessEvent(motion);
+				require(status->GetLabel().Contains("15 degrees"), "Actual motion slider handler.");
+				capture(dialog, wxFileName(output, "glb_pivot_motion_ui.png").GetFullPath());
+				slider->SetValue(0); slider->GetEventHandler()->ProcessEvent(motion);
+				require(status->GetLabel().Contains("0 degrees"), "Motion reset handler.");
+				tabs->SetSelection(0);
+				namedButton(&dialog, "glb-confirm-alignment");
+				capture(dialog, wxFileName(output, "glb_alignment_ui.png").GetFullPath());
+				button(&dialog, wxID_FORWARD);
 				require(!dialog.FindWindow(wxID_FORWARD)->IsEnabled() && !list->IsEnabled(), "Review must not offer fake export.");
 				auto* report = dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName("glb-report", &dialog));
 				require(report && report->GetValue().Contains("Included size (metres)") &&
@@ -114,6 +166,9 @@ namespace
 			{
 				button(&dialog, wxID_FORWARD);
 				capture(dialog, wxFileName(output, "m4a1_assignment_ui.png").GetFullPath());
+				button(&dialog, wxID_FORWARD);
+				capture(dialog, wxFileName(output, "m4a1_alignment_ui.png").GetFullPath());
+				namedButton(&dialog, "glb-confirm-alignment");
 				button(&dialog, wxID_FORWARD);
 				require(!dialog.FindWindow(wxID_FORWARD)->IsEnabled(), "Real GLB review state.");
 				capture(dialog, wxFileName(output, "m4a1_review_ui.png").GetFullPath());
@@ -190,7 +245,7 @@ void testGlbImportProjects(const wxString& repo, const wxString& output)
 		auto xml = completeXml; replace(xml, from, to); write(broken, xml);
 		fails([&] { loadGlbImportProject(broken, reopened); }, reason);
 	};
-	corrupt("version=\"1\"", "version=\"99\"", "version");
+	corrupt("version=\"2\"", "version=\"99\"", "version");
 	corrupt("role=\"body\"", "role=\"unknown\"", "Unknown saved");
 	corrupt("index=\"1\"", "index=\"0\"", "identity/order");
 	corrupt("node=\"1\"", "node=\"99\"", "identity/order");
@@ -238,6 +293,13 @@ void testGlbImportProjects(const wxString& repo, const wxString& output)
 	saveGlbImportProject(realPath, real, realProject);
 	const auto roundTrip = loadGlbImportProject(realPath, reopened);
 	require(roundTrip.roles == realProject.roles && reopened.sourceSha256 == real.sourceSha256, "M4A1 project/source round trip.");
-	realWizard(real, realProject, output);
+	auto confirmed = realProject;
+	confirmed.alignment.confirmed = true;
+	for (size_t i = 0; i < real.parts.size(); ++i)
+	{
+		auto pivot = confirmed.pivots[i]; pivot.confirmed = true;
+		assignGlbPivot(real, confirmed, i, pivot);
+	}
+	realWizard(real, confirmed, output);
 	std::cout << "User M4A1: " << real.parts.size() << " parts; " << suggested << " name suggestions; source SHA256 " << real.sourceSha256 << "\n";
 }
