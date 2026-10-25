@@ -48,12 +48,72 @@ Enhanced support in FiveM is early access; keep gen9 models under 128 materials/
 
 The in-app **Help > How to use** shows a short version of this.
 
+### Built-in converter: texture dictionary milestone
+
+**Tools > Build texture dictionary from PNG...** creates a binary `.ytd`
+without Blender, Sollumz, CodeWalker or another external converter:
+
+1. Select one or more **diffuse/color PNGs**. File names become texture names
+   (case-insensitive ASCII letters, digits and underscores; no extension).
+   They must match the texture names referenced by the model's shaders.
+2. Choose **Legacy (gen8)** or **Enhanced (gen9)**.
+3. Save the `.ytd` next to the matching `.ydr`, using the weapon model's name.
+   Reimport that folder to refresh the asset list and preview.
+
+Opaque images use BC1/DXT1; images with transparency use BC3/DXT5. Dimensions
+must be powers of two: **4..4096 for Legacy**, **1..4096 for Enhanced**.
+Legacy mips stop when either dimension reaches four pixels, matching the
+sample resources; Enhanced mips continue to 1x1. Diffuse mip filtering uses
+linear-light, alpha-weighted colors. Normal maps and packed material maps
+must not use this diffuse-only command.
+
+Invalid dimensions, duplicate names/hash collisions, `script_rt_` textures
+and inputs above 128 MiB of RGBA data are rejected with an error. The command
+does not resize images silently. It builds the dictionary before saving and
+uses a temporary file so a failed conversion does not truncate an existing
+output file.
+
+**This is not yet the GLB-to-resource workflow.** GLB import, PBR material
+mapping, `.ydr` writing, skeletons, component attachment points and LOD
+generation remain to be implemented. The new `.ytd` writer is checked by
+native round-trip tests and an independent Python reader against both
+generations of the supplied assets; in-game validation is still required.
+
+## License
+
+GPL-3.0 (see [LICENSE](LICENSE)). Format research references and preserved
+third-party notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+The new resource/texture writer is an original implementation, not a port
+of CodeWalker. CodeWalker's source is marked educational-use-only, not
+generally GPL; Sollumz's license does not grant permission to copy CodeWalker.
+Neither tool is required at runtime.
+
 ## Building
 
 Requires Visual Studio 2026 (toolset v145, C++ desktop workload) and wxWidgets (e.g. `vcpkg install wxwidgets:x64-windows` followed by `vcpkg integrate install`). The post-build step copies `templates`, `export` and `icon.ico` next to the exe, so the output folder (e.g. `x64\Release`) is runnable as is.
+
+### Resource writer tests
+
+In a VS 2026 Developer PowerShell, from the repository root:
+
+```powershell
+MSBuild .\tests\ResourceWriterTests.vcxproj /p:Configuration=Release /p:Platform=x64 /v:minimal
+if ($LASTEXITCODE -ne 0) { throw "Test build failed" }
+New-Item -ItemType Directory -Force .\tests\x64\Release\generated | Out-Null
+.\tests\x64\Release\ResourceWriterTests.exe "$PWD" "$PWD\tests\x64\Release\generated"
+if ($LASTEXITCODE -ne 0) { throw "Native tests failed" }
+python .\tests\verify_resources.py "$PWD" "$PWD\tests\x64\Release\generated"
+if ($LASTEXITCODE -ne 0) { throw "Independent verification failed" }
+```
+
+Python 3 is needed only for independent verification, not by the application.
+Tests cover page sizing/version flags, raw DEFLATE, pointers, dictionary
+hash ordering, gen9 SRVs, BC1/BC3 color/alpha error limits, mip chains,
+invalid inputs, deterministic output, Unicode output paths and loading
+new dictionaries with the supplied gen8/gen9 regular and high-LOD drawables.
+Generated fixtures and test binaries stay under the ignored `tests\x64` directory.
 
 ## Planned #TODO
 - Singleplayer support
 - More templates from DLC weapons
 - Add-on ammo creation
-

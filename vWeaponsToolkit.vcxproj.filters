@@ -36,6 +36,12 @@
     <ClInclude Include="cModelPreview.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cRscWriter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cYtdWriter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cApp.cpp">
@@ -54,6 +60,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cModelPreview.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cRscWriter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cYtdWriter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -6,6 +6,7 @@ wxIMPLEMENT_APP(cApp);
 
 bool cApp::OnInit()
 {
+	wxInitAllImageHandlers();
 
 	// Templates and icon are loaded via relative paths, so run from the exe folder.
 	wxSetWorkingDirectory(wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath());

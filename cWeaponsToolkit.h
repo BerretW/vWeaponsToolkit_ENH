@@ -64,6 +64,7 @@ private:
 	void onWeaponNameChanged(wxCommandEvent& evt);
 	void onWeaponIdChanged(wxCommandEvent& evt);
 	void onWeaponModelChanged(wxCommandEvent& evt);
+	void onFileSelected(wxListEvent& evt);
 	void onCreateWeaponNextButtonChanged(wxCommandEvent& evt);
 	void searchForWeaponAssets(const std::wstring& directory);
 	void validateWeaponAssets();
@@ -80,6 +81,7 @@ private:
 	void onComponentEnabledCheckboxChanged(wxCommandEvent& evt);
 	void onExportDirectoryChanged(wxCommandEvent& evt);
 	void onExportButtonPressed(wxCommandEvent& evt);
+	void onBuildTextureDictionary(wxCommandEvent& evt);
 	bool exportResource(const std::string& folderName, const std::string& gen9Directory);
 	void onAudioItemChanged(wxCommandEvent& evt);
 	void onAmmoTypeChanged(wxCommandEvent& evt);

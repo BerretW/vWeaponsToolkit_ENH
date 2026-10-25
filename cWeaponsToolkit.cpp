@@ -10,6 +10,14 @@
 #include <wx/checkbox.h>
 #include <direct.h>
 #include "cWeaponAsset.h"
+#include "cYtdWriter.h"
+#include "cRscWriter.h"
+#include <wx/choicdlg.h>
+#include <wx/filedlg.h>
+#include <wx/filename.h>
+#include <wx/utils.h>
+#include <stdexcept>
+#include <algorithm>
 
 int cWeaponsToolkit::getWeaponCount() {
 	int count = 0;
@@ -102,6 +110,8 @@ int cWeaponsToolkit::getDamageTypesCount()
 	return count;
 }
 
+static bool isBaseModelFile(const std::string& n);
+
 void cWeaponsToolkit::onImportDirectoryChanged(wxCommandEvent& evt) {
 	const std::string tmpDir = importerDirectoryPicker->GetPath().ToStdString();
 
@@ -109,7 +119,35 @@ void cWeaponsToolkit::onImportDirectoryChanged(wxCommandEvent& evt) {
 	std::wstring wide = converter.from_bytes(tmpDir);
 
 	searchForWeaponAssets(wide);
+
+	// Auto-select the first model if the current name does not match any found file.
+	bool match = false;
+	std::string firstModel;
+	for (int i = filesFoundListCtrl->GetItemCount() - 1; i >= 0; i--) {
+		std::string n = filesFoundListCtrl->GetItemText(i).ToStdString();
+		if (!isBaseModelFile(n)) continue;
+		if (firstModel.empty()) firstModel = n.substr(0, n.size() - 4);
+		if (n.substr(0, n.size() - 4) == generatedWeapon->getWeaponModel()) match = true;
+	}
+	if (!match && !firstModel.empty()) {
+		weaponModelTextCtrl->SetValue(firstModel);
+		return;
+	}
 	validateWeaponAssets();
+}
+
+static bool isBaseModelFile(const std::string& n)
+{
+	auto ends = [&](const char* e) { size_t l = strlen(e); return n.size() > l && n.compare(n.size() - l, l, e) == 0; };
+	return ends(".ydr") && !ends("_hi.ydr");
+}
+
+void cWeaponsToolkit::onFileSelected(wxListEvent& evt)
+{
+	std::string name = filesFoundListCtrl->GetItemText(evt.GetIndex()).ToStdString();
+	if (!isBaseModelFile(name))
+		return;
+	weaponModelTextCtrl->SetValue(name.substr(0, name.size() - 4));
 }
 
 void cWeaponsToolkit::onWeaponTemplateChanged(wxCommandEvent& evt)
@@ -1235,6 +1273,68 @@ void cWeaponsToolkit::searchForWeaponAssets(const std::wstring& directory)
 	}
 }
 
+void cWeaponsToolkit::onBuildTextureDictionary(wxCommandEvent&)
+{
+	wxFileDialog input(this, "Select diffuse textures (power-of-two PNGs, up to 4096)",
+		wxEmptyString, wxEmptyString, "PNG images (*.png)|*.png", wxFD_OPEN | wxFD_FILE_MUST_EXIST | wxFD_MULTIPLE);
+	if (input.ShowModal() != wxID_OK) return;
+	wxArrayString paths;
+	input.GetPaths(paths);
+	wxArrayString choices;
+	choices.Add("Legacy (gen8)");
+	choices.Add("Enhanced (gen9)");
+	wxSingleChoiceDialog target(this, "Select the target game format.", "Texture dictionary", choices);
+	if (target.ShowModal() != wxID_OK) return;
+	const auto generation = target.GetSelection() == 0 ? GameGeneration::Legacy : GameGeneration::Enhanced;
+	wxFileDialog output(this, "Save texture dictionary", wxEmptyString,
+		wxString::FromUTF8(generatedWeapon->getWeaponModel()) + ".ytd",
+		"Texture dictionary (*.ytd)|*.ytd", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	if (output.ShowModal() != wxID_OK) return;
+	try
+	{
+		wxBusyCursor busy;
+		std::vector<YtdImage> images;
+		size_t totalBytes = 0;
+		for (const auto& path : paths)
+		{
+			wxImage source;
+			if (!source.LoadFile(path, wxBITMAP_TYPE_PNG))
+				throw std::runtime_error("Could not load PNG: " + path.ToStdString());
+			const int w = source.GetWidth(), h = source.GetHeight();
+			if (w < 1 || h < 1 || w > 4096 || h > 4096 || (w & (w - 1)) || (h & (h - 1)))
+				throw std::runtime_error("PNG dimensions must be powers of two, 1..4096: " + path.ToStdString());
+			YtdImage image;
+			image.name = wxFileName(path).GetName().ToStdString();
+			image.width = static_cast<uint32_t>(w);
+			image.height = static_cast<uint32_t>(h);
+			totalBytes += size_t(w) * h * 4;
+			if (totalBytes > 128 * 1024 * 1024)
+				throw std::length_error("The selected images exceed the 128 MiB RGBA limit per dictionary.");
+			image.rgba.resize(size_t(w) * h * 4);
+			const auto* rgb = source.GetData();
+			const auto* alpha = source.GetAlpha();
+			for (size_t i = 0; i < size_t(w) * h; ++i)
+			{
+				std::copy_n(rgb + i * 3, 3, image.rgba.data() + i * 4);
+				image.rgba[i * 4 + 3] = alpha ? alpha[i] :
+					(source.HasMask() && rgb[i * 3] == source.GetMaskRed() &&
+						rgb[i * 3 + 1] == source.GetMaskGreen() && rgb[i * 3 + 2] == source.GetMaskBlue() ? 0 : 255);
+			}
+			images.push_back(std::move(image));
+		}
+		cRscWriter::save(output.GetPath(), buildYtd(images, generation));
+	}
+	catch (const std::exception& error)
+	{
+		wxMessageBox(wxString::FromUTF8(error.what()), "Texture export failed", wxOK | wxICON_ERROR, this);
+		return;
+	}
+	wxMessageBox("Texture dictionary saved:\n" + output.GetPath() +
+		"\n\nThis creates diffuse textures only, not a complete weapon. "
+		"Texture names come from the PNG file names and must match the model's shader texture names.",
+		"Texture export complete", wxOK | wxICON_INFORMATION, this);
+}
+
 cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit", wxPoint((wxSystemSettings::GetMetric(wxSYS_SCREEN_X) / 2) - (800/2), (wxSystemSettings::GetMetric(wxSYS_SCREEN_Y) / 2) - (500 /2)), wxSize(windowWidth, windowHeight))
 {
 	// Initialize wxWidgets Menu.
@@ -1255,8 +1355,13 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 	helpMenu->Append(wxID_HELP, wxT("&How to use"));
 
 	menuBar->Append(fileMenu, "&File");
+	wxMenu* toolsMenu = new wxMenu;
+	const auto textureToolId = wxWindow::NewControlId();
+	toolsMenu->Append(textureToolId, "Build texture dictionary from PNG...");
+	menuBar->Append(toolsMenu, "&Tools");
 	menuBar->Append(helpMenu, "&Help");
 	SetMenuBar(menuBar);
+	Bind(wxEVT_MENU, &cWeaponsToolkit::onBuildTextureDictionary, this, textureToolId);
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		wxMessageBox(
@@ -1268,7 +1373,11 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 			"4. Export: choose an export folder and press Export. Copy the created folder into your FiveM resources "
 			"and add 'ensure <folder>' to server.cfg.\n"
 			"   For FiveM Enhanced: convert models to gen9 first (Alchemist/CodeWalker/Sollumz), tick the Enhanced option "
-			"and select the folder with converted files (same names). A '<name>_enhanced' resource is created too.",
+			"and select the folder with converted files (same names). A '<name>_enhanced' resource is created too.\n\n"
+			"Tools > Build texture dictionary from PNG: select diffuse PNGs (power-of-two sizes, "
+			"4..4096 for gen8 or 1..4096 for gen9), "
+			"choose gen8 or gen9 and save a .ytd. Names come from PNG file names. "
+			"This does not yet convert GLB geometry.",
 			"vWeaponsToolkit - How to use", wxOK | wxICON_INFORMATION, this);
 	}, wxID_HELP);
 
@@ -1338,6 +1447,7 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 	weaponNameTextCtrl->Bind(wxEVT_TEXT, &cWeaponsToolkit::onWeaponNameChanged, this);
 	weaponIdTextCtrl->Bind(wxEVT_TEXT, &cWeaponsToolkit::onWeaponIdChanged, this);
 	weaponModelTextCtrl->Bind(wxEVT_TEXT, &cWeaponsToolkit::onWeaponModelChanged, this);
+	filesFoundListCtrl->Bind(wxEVT_LIST_ITEM_SELECTED, &cWeaponsToolkit::onFileSelected, this);
 
 	//TAB 2 - Configuration
 	wxStaticText* audioItemStaticText = new wxStaticText(configTab, wxID_ANY, "Select Audio Item", wxPoint(20, 30));
