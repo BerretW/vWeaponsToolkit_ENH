@@ -1,9 +1,11 @@
-"""Independent stdlib-only RSC7/YTD checks; run after ResourceWriterTests."""
+"""Independent stdlib-only resource/import-project checks; run after ResourceWriterTests."""
+import hashlib
 import math
 import struct
 import sys
 import unittest
 import zlib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -393,6 +395,32 @@ class WriterTests(unittest.TestCase):
             self.assertEqual(textures["w_ar_carbinerifle_m31"][0][:3], (1024, 1024, "BC1"))
             written = Resource(OUTPUT / f"{generation}_weapon.ytd").textures()
             self.assertEqual(len(written), 3)
+
+    def test_import_projects(self):
+        for filename in ("mapping.vwtimport.xml", "m4a1_preparation.vwtimport.xml"):
+            path = OUTPUT / filename
+            if not path.exists() and filename.startswith("m4a1"):
+                continue
+            with self.subTest(project=filename):
+                root = ET.parse(path).getroot()
+                self.assertEqual(root.tag, "glb-import")
+                self.assertEqual(root.attrib["version"], "1")
+                self.assertEqual(root.attrib["template"], "WEAPON_CARBINERIFLE")
+                source = (path.parent / root.attrib["source"]).resolve()
+                if not source.exists() and filename.startswith("m4a1"):
+                    continue
+                raw = source.read_bytes()
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), root.attrib["sha256"])
+                parts = list(root)
+                self.assertEqual([int(p.attrib["index"]) for p in parts], list(range(len(parts))))
+                identities = [(int(p.attrib["node"]), int(p.attrib["primitive"])) for p in parts]
+                self.assertEqual(len(set(identities)), len(parts))
+                self.assertTrue(all(p.tag == "part" for p in parts))
+                self.assertIn("body", [p.attrib["role"] for p in parts])
+                if filename == "mapping.vwtimport.xml":
+                    self.assertEqual([p.attrib["role"] for p in parts], ["body", "excluded"])
+                else:
+                    self.assertEqual(len(parts), 15)
 
     def test_written_drawables(self):
         # The supplied shader provides an independent reference for the gen9 binding table.

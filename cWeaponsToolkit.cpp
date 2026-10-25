@@ -12,6 +12,7 @@
 #include "cWeaponAsset.h"
 #include "cYtdWriter.h"
 #include "cGlbImporter.h"
+#include "cGlbImportDialog.h"
 #include "cRscWriter.h"
 #include <wx/choicdlg.h>
 #include <wx/filedlg.h>
@@ -1276,65 +1277,31 @@ void cWeaponsToolkit::searchForWeaponAssets(const std::wstring& directory)
 
 void cWeaponsToolkit::onImportGlb(wxCommandEvent&)
 {
-	wxFileDialog input(this, "Import static GLB for inspection", wxEmptyString, wxEmptyString,
-		"Binary glTF (*.glb)|*.glb", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	wxFileDialog input(this, "Import GLB or open a preparation project", wxEmptyString, wxEmptyString,
+		"GLB model or import project|*.glb;*.vwtimport.xml|Binary glTF (*.glb)|*.glb|GLB import project (*.vwtimport.xml)|*.vwtimport.xml",
+		wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 	if (input.ShowModal() != wxID_OK) return;
 	try
 	{
 		GlbModel imported;
+		GlbImportProject project;
+		wxString projectPath;
 		{
 			wxBusyCursor busy;
-			imported = loadGlb(input.GetPath());
-		}
-		wxDialog dialog(this, wxID_ANY, "GLB inspection - " + wxFileName(input.GetPath()).GetFullName(),
-			wxDefaultPosition, wxSize(1100, 720), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-		auto* layout = new wxBoxSizer(wxVERTICAL);
-		auto* heading = new wxStaticText(&dialog, wxID_ANY,
-			"Static GLB inspection only - does not change the current weapon or export a resource.\n"
-			"Select a part on the left. Drag to rotate, wheel to zoom, double-click to reset. Units: metres; axes: Z-up.");
-		layout->Add(heading, 0, wxALL | wxEXPAND, 10);
-		auto* row = new wxBoxSizer(wxHORIZONTAL);
-		auto* parts = new wxListCtrl(&dialog, wxID_ANY, wxDefaultPosition, wxSize(480, 400), wxLC_REPORT | wxLC_SINGLE_SEL);
-		parts->InsertColumn(0, "Node / mesh / primitive", wxLIST_FORMAT_LEFT, 250);
-		parts->InsertColumn(1, "Vertices", wxLIST_FORMAT_RIGHT, 65);
-		parts->InsertColumn(2, "Tris", wxLIST_FORMAT_RIGHT, 55);
-		parts->InsertColumn(3, "Material", wxLIST_FORMAT_LEFT, 105);
-		parts->InsertItem(0, "All parts");
-		for (size_t i = 0; i < imported.parts.size(); ++i)
-		{
-			const auto& part = imported.parts[i];
-			const auto index = parts->InsertItem(static_cast<long>(i+1), wxString::FromUTF8(part.name));
-			parts->SetItem(index, 1, wxString::Format("%zu", part.geometry.vertices.size()));
-			parts->SetItem(index, 2, wxString::Format("%zu", part.geometry.indices.size()/3));
-			parts->SetItem(index, 3, wxString::FromUTF8(imported.materials[part.geometry.material].name));
-		}
-		auto* preview = new cModelPreviewPanel(&dialog, wxDefaultPosition, wxSize(500, 400));
-		row->Add(parts, 1, wxEXPAND | wxRIGHT, 8);
-		row->Add(preview, 1, wxEXPAND);
-		layout->Add(row, 1, wxEXPAND | wxLEFT | wxRIGHT, 10);
-		wxString report;
-		for (const auto& text : imported.warnings) report += "- " + wxString::FromUTF8(text) + "\n";
-		auto* notices = new wxTextCtrl(&dialog, wxID_ANY, report, wxDefaultPosition, wxSize(-1, 100),
-			wxTE_MULTILINE | wxTE_READONLY);
-		layout->Add(notices, 0, wxEXPAND | wxALL, 10);
-		layout->Add(dialog.CreateButtonSizer(wxCLOSE), 0, wxALIGN_RIGHT | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-		dialog.SetSizer(layout);
-		dialog.SetMinSize(wxSize(900, 600));
-		preview->showModel(makeGlbPreview(imported));
-		parts->SetItemState(0, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
-		parts->Bind(wxEVT_LIST_ITEM_SELECTED, [&](wxListEvent& evt) {
-			try
+			if (input.GetPath().Lower().EndsWith(".vwtimport.xml"))
 			{
-				wxBusyCursor busy;
-				preview->showModel(makeGlbPreview(imported, static_cast<int>(evt.GetIndex())-1));
+				project = loadGlbImportProject(input.GetPath(), imported);
+				projectPath = input.GetPath();
 			}
-			catch (const std::exception& error)
+			else
 			{
-				wxMessageBox(wxString::FromUTF8(error.what()), "GLB preview failed", wxOK | wxICON_ERROR, &dialog);
+				imported = loadGlb(input.GetPath());
+				project = createGlbImportProject(imported, input.GetPath(), generatedWeapon->getWeaponTemplate());
 			}
-		});
-		dialog.Bind(wxEVT_BUTTON, [&dialog](wxCommandEvent&) { dialog.EndModal(wxID_CLOSE); }, wxID_CLOSE);
-		dialog.CentreOnParent();
+		}
+		wxArrayString templates;
+		for (const char* name : generatedWeapon->nativeWeapons) if (name) templates.Add(wxString::FromUTF8(name));
+		cGlbImportDialog dialog(this, std::move(imported), std::move(project), templates, projectPath);
 		dialog.ShowModal();
 	}
 	catch (const std::exception& error)
@@ -1427,7 +1394,7 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 	menuBar->Append(fileMenu, "&File");
 	wxMenu* toolsMenu = new wxMenu;
 	const auto glbToolId = wxWindow::NewControlId();
-	toolsMenu->Append(glbToolId, "Import GLB for inspection...");
+	toolsMenu->Append(glbToolId, "Import GLB / open preparation project...");
 	toolsMenu->AppendSeparator();
 	const auto textureToolId = wxWindow::NewControlId();
 	toolsMenu->Append(textureToolId, "Build texture dictionary from PNG...");
@@ -1452,10 +1419,13 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 			"4..4096 for gen8 or 1..4096 for gen9), "
 			"choose gen8 or gen9 and save a .ytd. Names come from PNG file names. "
 			"This does not yet convert GLB geometry.\n\n"
-			"Import GLB: use the button on the first tab or Tools > Import GLB for inspection. "
-			"Embedded GLB 2.0, static triangles, PNG/JPEG textures. Select individual named parts in the left list. "
-			"This is an inspection step, not weapon/resource export. Separate body, moving parts and optional "
-			"components in your source model; see MODEL_IMPORT.md next to the executable for the proposed structure.",
+			"Import GLB: use the button on the first tab or Tools > Import GLB / open preparation project. "
+			"Inspect the model, press Next to assign object roles, then Next to review the included assembly. "
+			"Every object needs a role or explicit exclusion; at least one must be Body. "
+			"Save project stores a resumable .vwtimport.xml (drafts allowed), not game assets. "
+			"Open that project through the same Import GLB button. Changed source GLBs are rejected by SHA-256. "
+			"Rigging/material conversion/resource export are not connected yet. "
+			"See MODEL_IMPORT.md next to the executable for preparation details.",
 			"vWeaponsToolkit - How to use", wxOK | wxICON_INFORMATION, this);
 	}, wxID_HELP);
 

@@ -13,12 +13,18 @@ struct GlbMaterial
 struct GlbPart
 {
 	std::string name;
+	std::vector<std::string> nodeNames;
+	size_t nodeIndex = 0;
+	size_t meshIndex = 0;
+	size_t primitiveIndex = 0;
+	std::array<float, 16> sourceWorldTransform = {};
 	YdrMesh geometry;
 	bool hasTangents = false;
 };
 
 struct GlbModel
 {
+	std::string sourceSha256;
 	std::vector<GlbPart> parts;
 	std::vector<GlbMaterial> materials;
 	std::vector<PreviewTexture> textures;
@@ -31,3 +37,4 @@ struct GlbModel
 GlbModel importGlb(const std::vector<uint8_t>& bytes);
 GlbModel loadGlb(const wxString& path);
 PreviewModel makeGlbPreview(const GlbModel& source, int selectedPart = -1);
+PreviewModel makeGlbPreview(const GlbModel& source, const std::vector<size_t>& selectedParts);

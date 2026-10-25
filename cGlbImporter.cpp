@@ -11,6 +11,8 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 
 namespace
 {
@@ -37,6 +39,31 @@ namespace
 		std::free(p);
 	}
 	[[noreturn]] void fail(const std::string& text) { throw std::runtime_error("GLB: " + text); }
+	std::string sha256(const std::vector<uint8_t>& bytes)
+	{
+		struct Handles
+		{
+			BCRYPT_ALG_HANDLE algorithm = nullptr;
+			BCRYPT_HASH_HANDLE hash = nullptr;
+			~Handles()
+			{
+				if (hash) BCryptDestroyHash(hash);
+				if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+			}
+		} handles;
+		if (BCryptOpenAlgorithmProvider(&handles.algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
+			BCryptCreateHash(handles.algorithm, &handles.hash, nullptr, 0, nullptr, 0, 0) < 0)
+			fail("Could not initialize source SHA-256.");
+		std::array<UCHAR, 32> digest;
+		// CNG does not modify input, but its API takes a non-const pointer.
+		if (BCryptHashData(handles.hash, const_cast<UCHAR*>(bytes.data()), static_cast<ULONG>(bytes.size()), 0) < 0 ||
+			BCryptFinishHash(handles.hash, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0)
+			fail("Could not calculate source SHA-256.");
+		const char* hex = "0123456789abcdef";
+		std::string result;
+		for (auto value : digest) { result += hex[value >> 4]; result += hex[value & 15]; }
+		return result;
+	}
 	void check(cgltf_result result, const char* operation)
 	{
 		if (result != cgltf_result_success)
@@ -182,7 +209,7 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 	if (!data->scenes_count || data->nodes_count > 4096 || data->materials_count > 128 || data->images_count > 128)
 		fail("Requires a scene, at most 4096 nodes, 128 materials and 128 images.");
 	GlbModel out;
-	warning(out, "Static inspection only: no weapon rigging, GTA shader conversion or resource export.");
+	warning(out, "Static geometry only: no weapon rigging, GTA shader conversion or resource export.");
 	warning(out, "Preview uses base color and vertex colors only; alpha, normal maps and PBR lighting are not rendered.");
 	if (data->animations_count) warning(out, "Animations are not played; showing the authored static node transforms.");
 	const auto* scene = data->scene ? data->scene : &data->scenes[0];
@@ -274,6 +301,13 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 			geometryBytes += vertexCount*sizeof(YdrVertex) + count*sizeof(uint32_t);
 			if (geometryBytes > 64*1024*1024 || out.parts.size() >= 128) fail("Geometry exceeds 64 MiB or 128 primitive instances.");
 			GlbPart part;
+			part.nodeIndex = size_t(node - data->nodes);
+			part.meshIndex = size_t(node->mesh - data->meshes);
+			part.primitiveIndex = p;
+			part.sourceWorldTransform = m;
+			for (const auto* parent = node; parent; parent = parent->parent)
+				part.nodeNames.push_back(parent->name ? parent->name : "node_" + std::to_string(parent - data->nodes));
+			std::reverse(part.nodeNames.begin(), part.nodeNames.end());
 			part.name = std::string(node->name ? node->name : "node_" + std::to_string(node - data->nodes)) +
 				" / " + (node->mesh->name ? node->mesh->name : "mesh") + " / primitive_" + std::to_string(p);
 			part.hasTangents = tangent != nullptr && normal != nullptr;
@@ -348,6 +382,7 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 		}
 	}
 	if (out.parts.empty()) fail("The selected scene has no triangle meshes.");
+	out.sourceSha256 = sha256(bytes);
 	return out;
 }
 
@@ -365,13 +400,22 @@ GlbModel loadGlb(const wxString& path)
 PreviewModel makeGlbPreview(const GlbModel& source, int selectedPart)
 {
 	if (selectedPart < -1 || selectedPart >= static_cast<int>(source.parts.size())) fail("Preview part index is out of range.");
+	std::vector<size_t> selected;
+	for (size_t i = 0; i < source.parts.size(); ++i)
+		if (selectedPart < 0 || i == size_t(selectedPart)) selected.push_back(i);
+	return makeGlbPreview(source, selected);
+}
+
+PreviewModel makeGlbPreview(const GlbModel& source, const std::vector<size_t>& selectedParts)
+{
 	PreviewModel out;
 	out.textures = source.textures;
 	for (unsigned k = 0; k < 3; ++k) { out.bmin[k] = std::numeric_limits<float>::max(); out.bmax[k] = -out.bmin[k]; }
 	size_t triangles = 0;
-	for (size_t i = 0; i < source.parts.size(); ++i)
+	std::set<size_t> seen;
+	for (size_t i : selectedParts)
 	{
-		if (selectedPart >= 0 && i != size_t(selectedPart)) continue;
+		if (i >= source.parts.size() || !seen.insert(i).second) fail("Invalid/duplicate preview part index.");
 		const auto& part = source.parts[i];
 		const auto& material = source.materials.at(part.geometry.material);
 		PreviewMesh mesh;

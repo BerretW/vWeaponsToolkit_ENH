@@ -114,11 +114,31 @@ yet been validated in GTA/FiveM; a binary round trip is not an in-game test.
 
 ### GLB import and model preparation
 
-Use **Import GLB...** on the first tab or **Tools > Import GLB for
-inspection...**. A separate window shows the assembled model, named
-node/mesh/primitive rows, vertex/triangle counts and material names. Choose
-**All parts** or a part in the left list; drag to rotate, scroll to zoom.
+Use **Import GLB...** on the first tab or **Tools > Import GLB / open
+preparation project...**:
+
+1. **Inspect** the assembled model. Select a source object on the left;
+   drag to rotate, scroll to zoom. All its material primitives are previewed
+   together; the selected material name is shown in the preview status.
+2. Press **Next: assign parts**. Choose the planned weapon template and
+   output model name, then assign roles using the dropdown: body/fixed
+   detail, magazine, bolt, trigger, charging handle, other moving part,
+   optional component, or explicit exclusion.
+   **Apply name suggestions** uses source node/parent names, but only after
+   you request it and never overwrites manually assigned objects.
+   Review every suggestion; unknown objects stay unassigned.
+3. Press **Next: review**. All objects must be assigned or excluded, with at
+   least one Body. The review shows the included assembly (without excluded
+   parts), object-role counts, size in metres and remaining conversion work.
+   **Back** preserves the assignments.
+4. **Save project...** stores a draft or completed mapping as
+   `<name>.vwtimport.xml`. Keep this filename suffix. Reopen it through the
+   same Import GLB button. The project references the original GLB and
+   checks its SHA-256; it does not embed or modify the model. Keep the source
+   GLB with the project. A re-exported/changed GLB needs a new import.
+
 Your existing weapon configuration and `.ydr/.ytd` export are not changed.
+Closing a changed project asks whether to save it.
 
 The native importer reads embedded GLB 2.0 triangle geometry, scene/node
 transforms, normals, UVs, tangents, vertex colors, base-color factors and
@@ -127,8 +147,10 @@ Mirrored/nonuniform transforms are handled explicitly. Missing normals
 generate flat faces; missing tangents and preview limitations are reported.
 Unsupported inputs fail with a diagnostic rather than dropping meshes.
 
-**This is static inspection, not GLB-to-resource export.** There is no
+**These are preparation steps, not GLB-to-resource export.** There is no
 automatic PBR-to-GTA material conversion, rigging or component generation.
+Saved roles are semantic authoring roles, not actual GTA bone assignments.
+The planned template is recorded in the project, not applied as a rig.
 The preview is base-color/basic lighting only, not PBR/alpha rendering.
 See [MODEL_IMPORT.md](MODEL_IMPORT.md) for limits and the proposed authoring
 hierarchy: fixed body together, moving parts and removable components
@@ -173,7 +195,14 @@ buffer copies and resource slots, and invalid geometry/material inputs.
 GLB tests cover hierarchy/instances, inverse-transpose normals, mirrored
 winding/tangents, UV/color/material data, embedded PNG alpha/JPEG, per-part
 selection, flat-normal generation, Unicode paths and malformed/unsupported
-inputs. The generated `static_import.glb` can also be opened in the GUI.
+inputs. Project tests cover drafts/completed mappings, relative/Unicode paths,
+source SHA-256, malformed XML/roles/identity, failed-save preservation,
+grouping an object's material primitives, excluded assembly geometry and
+the actual modal wizard's Next/role selection/Review/Back event handlers.
+When `test\m4a1.glb` is present, it is tested read-only, including hierarchy
+role suggestions and project round trips; this optional user fixture is not
+required on a clean checkout. Own-dialog screenshots are written to the
+generated test directory. The generated `static_import.glb` can also be opened in the GUI.
 Generated fixtures and test binaries stay under the ignored `tests\x64` directory.
 
 ## Planned #TODO

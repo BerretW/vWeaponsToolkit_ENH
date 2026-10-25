@@ -13,6 +13,14 @@
 #include <limits>
 
 void testGlbImporter(const wxString& output);
+void testGlbImportProjects(const wxString& repo, const wxString& output);
+
+class ResourceWriterTestApp : public wxApp
+{
+public:
+	bool OnInit() override { return true; }
+};
+wxIMPLEMENT_APP_NO_MAIN(ResourceWriterTestApp);
 
 namespace
 {
@@ -216,6 +224,7 @@ int main(int argc, char** argv)
 		require(assetNameHash("DiffuseSampler") == 0xf1fe2b71, "Case-insensitive shader hashes.");
 		testDrawableWriter(output);
 		testGlbImporter(output);
+		testGlbImportProjects(repo, output);
 		testContainer(64, 0, path("system_only.rsc"));
 		testContainer(8192, 8193, path("page_growth.rsc"));
 		testContainer(48, 16 * 1024 * 1024 + 1, path("large_page.rsc"));

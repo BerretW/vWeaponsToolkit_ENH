@@ -51,6 +51,12 @@
     <ClInclude Include="cGlbImporter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cGlbImportProject.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cGlbImportDialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="third_party\cgltf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -84,6 +90,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cGlbImporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbImportProject.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbImportDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

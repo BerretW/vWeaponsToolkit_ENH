@@ -1,7 +1,8 @@
 # Weapon GLB source structure
 
 This is the proposed authoring contract for the GLB-to-weapon workflow.
-**Only static GLB inspection is currently implemented.** The names below
+**Static inspection, part-role assignment and resumable import projects are
+implemented; game conversion is not.** The names below
 describe authoring roles, not GTA bone names or an implemented automatic
 component exporter. Keep the original authoring file for later rigging.
 
@@ -55,7 +56,12 @@ The current importer shows **one row per node instance and primitive**.
 Select **All parts** or an individual row on the left. Objects using the
 same source mesh remain separate instances after their transforms are
 applied. Empty marker nodes are not rendered or converted to attachments.
-No role is inferred from a name yet.
+**Apply name suggestions** can propose roles from the object and its
+ancestors, for example a generically named mesh under `trigger`. Suggestions
+are applied only on request and only to unassigned objects. Ambiguous parts
+such as stock/sights remain for manual review. All material primitives of
+one source object receive the same role; a shared source mesh instantiated
+under another node can have a different role.
 
 ## Coordinates, units and pivots
 
@@ -72,7 +78,9 @@ No role is inferred from a name yet.
   The camera centres only the view, not the imported geometry.
 - Give moving objects meaningful local pivots: trigger hinge, cylinder
   axis, slide/bolt movement. Preserve these in the authoring file.
-  Static inspection bakes world transforms; it is not a rigged model.
+  Static inspection bakes world transforms for display, but retains the
+  original source world matrices/node hierarchy separately. Identity
+  transforms do not magically provide hinge/attachment pivots.
 - Prefer applying rotation/scale before export where that does not
   destroy the intended pivots. Nonuniform/mirrored transforms are supported:
   normals use inverse-transpose, mirrored winding/handedness are corrected.
@@ -141,9 +149,27 @@ to map these roles to the selected template's real bones, bind transforms,
 attachment points and component definitions, then generate appropriate LODs
 and gen8/gen9 assets.
 
-Today, use **Import GLB...** on the first tab or **Tools > Import GLB for
-inspection...**. This opens a separate inspection window and does not alter
-the current weapon configuration or export files. Static YDR serialization
+Today, use **Import GLB...** on the first tab or **Tools > Import GLB / open
+preparation project...**. The three steps are:
+
+1. Inspect the source.
+2. Assign every source object a role or explicitly exclude it. At least one
+   must be **Body / fixed detail**. Select the planned template/model name.
+3. Review only the included assembly and save the project.
+
+You can save unfinished assignments too. **Save project...** writes
+`<name>.vwtimport.xml`, a versioned XML file referencing the GLB, its SHA-256,
+source node/primitive identities, semantic roles, model name and planned
+template. It is **not** a FiveM resource and must not go into `stream`.
+Reopen it through Import GLB. Source paths are relative to the project
+folder where possible (absolute across Windows drives); moving the project
+and source together preserves that relationship. Changed GLB bytes, unknown
+roles and inconsistent/duplicate part identities are rejected, not guessed.
+The GLB itself remains untouched. Save validation failures do not truncate
+an existing project.
+
+The wizard does not alter the current weapon configuration or export files.
+Static YDR serialization
 exists as a separate backend, but GLB-to-game-shader/rig/resource conversion
 is not yet connected. Neither inspection nor binary round-trip tests replace
 an in-game FiveM test.
