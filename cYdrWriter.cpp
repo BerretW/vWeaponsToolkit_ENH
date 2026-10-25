@@ -9,7 +9,6 @@
 
 namespace
 {
-	const uint16_t vertexStride = 52;
 	const unsigned copies = 12;
 	using Vec3 = std::array<float, 3>;
 	using Vec4 = std::array<float, 4>;
@@ -49,8 +48,19 @@ namespace
 			throw std::invalid_argument("A drawable requires 1..128 materials and 1..128 meshes.");
 		finite(d.lodDistance, "LOD distance");
 		if (d.lodDistance <= 0) throw std::invalid_argument("LOD distance must be positive.");
+		const bool skinned=!d.skeleton.bones.empty();
+		if (skinned)
+		{
+			validateReferenceSkeleton(d.skeleton);
+			if (d.skeleton.bones.size()>255) throw std::invalid_argument("Drawable model bone-count field supports at most 255 bones.");
+			if (!d.skeleton.binaryMetadata) throw std::invalid_argument("Rigged YDR requires complete binary reference skeleton metadata.");
+		}
 		for (const auto& m : d.materials)
 		{
+			if (m.profile!=YdrShaderProfile::NormalSpecDecal && m.profile!=YdrShaderProfile::WeaponNormalSpecDetailPalette)
+				throw std::invalid_argument("Unsupported YDR shader profile.");
+			if (m.profile==YdrShaderProfile::WeaponNormalSpecDetailPalette)
+				for (const auto& name:{m.detailTexture,m.paletteTexture}) normalizeAssetName(name,"Texture");
 			for (const auto& name : { m.diffuseTexture, m.normalTexture, m.specularTexture })
 			{
 				auto normalized = normalizeAssetName(name, "Texture");
@@ -67,6 +77,10 @@ namespace
 		size_t vertexBytes = 0, indexBytes = 0;
 		for (const auto& mesh : d.meshes)
 		{
+			if ((skinned && (mesh.rigidBone<0 || mesh.rigidBone>=int(d.skeleton.bones.size()))) ||
+				(!skinned && mesh.rigidBone!=-1))
+				throw std::invalid_argument("Rigid bone binding does not match the drawable skeleton.");
+			const uint16_t vertexStride=skinned ? 60:52;
 			if (mesh.material >= d.materials.size()) throw std::invalid_argument("Mesh material index is out of range.");
 			if (mesh.vertices.size() < 3 || mesh.vertices.size() > 65535)
 				throw std::invalid_argument("Each mesh requires 3..65535 vertices; split larger meshes before writing.");
@@ -127,6 +141,60 @@ namespace
 	}
 	void header(cRscWriter& w, uint64_t at) { w.u32(at + 4, 1); }
 
+	uint64_t skeleton(cRscWriter& w,const ReferenceSkeleton& reference)
+	{
+		const auto count=reference.bones.size();
+		const auto at=w.allocate(ResourceSegment::System,112);
+		const auto bones=w.allocate(ResourceSegment::System,count*80);
+		const auto inverse=w.allocate(ResourceSegment::System,count*64),local=w.allocate(ResourceSegment::System,count*64);
+		const auto parents=w.allocate(ResourceSegment::System,count*2);
+		const auto pairs=w.allocate(ResourceSegment::System,reference.childPairs.size()*4);
+		const auto buckets=w.allocate(ResourceSegment::System,reference.tagBucketCount*8);
+		const auto tags=w.allocate(ResourceSegment::System,count*16);
+		std::vector<uint64_t> heads(reference.tagBucketCount,0);
+		const auto world=skeletonWorldMatrices(reference);
+		for (size_t i=0;i<count;++i)
+		{
+			const auto& bone=reference.bones[i];
+			const auto b=bones+i*80;
+			vec4(w,b,bone.rotation); vec3(w,b+16,bone.translation); vec4(w,b+32,{1,1,1,1});
+			w.u16(b+48,uint16_t(bone.sibling)); w.u16(b+50,uint16_t(bone.parent));
+			w.u64(b+56,string(w,bone.name)); w.u16(b+64,bone.flags); w.u16(b+66,uint16_t(i));
+			w.u16(b+68,bone.tag); w.u16(b+70,uint16_t(i));
+			w.u16(parents+i*2,uint16_t(bone.parent));
+			auto single=ReferenceSkeleton();
+			auto root=bone; root.parent=-1; root.sibling=-1;
+			single.bones.push_back(root);
+			const auto localMatrix=skeletonWorldMatrices(single)[0];
+			for (unsigned c=0;c<4;++c)
+				for (unsigned r=0;r<4;++r)
+				{
+					double inv=0;
+					if (c<3 && r<3) inv=world[i][r*4+c];
+					else if (c==3 && r<3)
+						for (unsigned k=0;k<3;++k) inv-=world[i][r*4+k]*world[i][12+k];
+					w.f32(inverse+i*64+c*16+r*4,float(inv));
+					w.f32(local+i*64+c*16+r*4,r==3 ? bone.transformExtra[c]:float(localMatrix[c*4+r]));
+				}
+			const auto bucket=bone.tag % reference.tagBucketCount;
+			const auto entry=tags+i*16;
+			w.u32(entry,bone.tag); w.u32(entry+4,uint32_t(i)); w.u64(entry+8,heads[bucket]);
+			heads[bucket]=entry;
+		}
+		for (size_t i=0;i<heads.size();++i) w.u64(buckets+i*8,heads[i]);
+		for (size_t i=0;i<reference.childPairs.size();++i)
+		{
+			w.u16(pairs+i*4,reference.childPairs[i][0]); w.u16(pairs+i*4+2,reference.childPairs[i][1]);
+		}
+		w.u64(at+16,buckets); w.u16(at+24,reference.tagBucketCount); w.u16(at+26,uint16_t(count));
+		w.u32(at+28,reference.unknown1C); w.u64(at+32,bones); w.u64(at+40,inverse); w.u64(at+48,local);
+		w.u64(at+56,parents); w.u64(at+64,pairs);
+		for (unsigned k=0;k<3;++k) w.u32(at+80+k*4,reference.signatures[k]);
+		w.u16(at+92,reference.unknown5C); w.u16(at+94,uint16_t(count));
+		w.u32(at+96,uint32_t(reference.childPairs.size()*2));
+		return at;
+	}
+
 	uint64_t textureReference(cRscWriter& w, const std::string& name, bool gen9)
 	{
 		const auto t = w.allocate(ResourceSegment::System, 80);
@@ -143,8 +211,66 @@ namespace
 		return t;
 	}
 
+	void weaponShader(cRscWriter& w,uint64_t at,const YdrMaterial& m,bool gen9)
+	{
+		const uint64_t textures[5]={textureReference(w,m.diffuseTexture,gen9),textureReference(w,m.detailTexture,gen9),
+			textureReference(w,m.normalTexture,gen9),textureReference(w,m.specularTexture,gen9),textureReference(w,m.paletteTexture,gen9)};
+		const auto hash=assetNameHash("weapon_normal_spec_detail_palette");
+		if (!gen9)
+		{
+			const uint32_t hashes[16]={0xF1FE2B71,0xCA4299E4,0x037EB699,0x46B7C64F,0x608799C6,0xAB98831E,
+				0xB51E2E8F,0x9D226F7C,0x4620A35D,0xF6712B81,0x28E1926B,0xEA3526E6,0x257DF714,
+				0xF418334F,0x87744680,0x27B9B2FA};
+			const uint8_t registers[16]={0,2,3,4,5,6,0xAA,0xA9,0xA7,0xA6,0xA5,0xA4,0xA3,0xA2,0xA1,0xA0};
+			const uint64_t refs[6]={textures[0],textures[1],textures[0],textures[2],textures[3],textures[4]};
+			const Vec4 values[10]={{0,0,1,1},{0,0,0,0},{0,0,0,0},{m.bumpiness,0,0,0},
+				{1,1,1,0},{1,0,0,0},{80,0,0,0},{m.specularIntensity,0,0,0},{m.specularFalloff,0,0,0},{m.specularFresnel,0,0,0}};
+			const auto p=w.allocate(ResourceSegment::System,2560);
+			for (unsigned i=0;i<16;++i)
+			{
+				w.u8(p+i*16,i<6 ? 0:1); w.u8(p+i*16+1,registers[i]);
+				w.u64(p+i*16+8,i<6 ? refs[i]:p+256+(i-6)*16);
+				w.u32(p+416+i*4,hashes[i]);
+				if (i>=6) vec4(w,p+256+(i-6)*16,values[i-6]);
+			}
+			w.u64(at,p); w.u32(at+8,hash); w.u8(at+16,16); w.u16(at+18,0x8000);
+			w.u16(at+20,416); w.u16(at+22,512); w.u32(at+24,assetNameHash("weapon_normal_spec_detail_palette.sps"));
+			w.u32(at+32,0xFF01); w.u8(at+39,6);
+			return;
+		}
+		const auto p=w.allocate(ResourceSegment::System,1543);
+		const auto refs=p+192+64*copies;
+		for (unsigned i=0;i<copies;++i)
+		{
+			const auto cb0=p+192+i*64,cb1=cb0+48;
+			w.u64(p+i*16,cb0); w.u64(p+i*16+8,cb1);
+			const float values[12]={m.specularFresnel,m.specularFalloff,m.specularIntensity,80,1,1,1,1,m.bumpiness,0,1,0};
+			for (unsigned k=0;k<12;++k) w.f32(cb0+k*4,values[k]);
+			vec4(w,cb1,{0,0,1,1});
+		}
+		w.u64(refs,textures[0]); w.u64(refs+16,textures[1]); w.u64(refs+24,textures[2]);
+		w.u64(refs+32,textures[3]); w.u64(refs+40,textures[4]);
+		const uint8_t samplers[7]={5,0,1,2,6,3,4}; w.bytes(refs+6*8*copies,samplers,7);
+		const uint32_t hashes[24]={0xC8E8C282,0x8E84DF1F,0x8DC1631C,0x1E77BF4C,0xC6F46E79,0x340F6E97,
+			0x77CA165F,0x184D4D47,0xE44690BB,0xF1FE2B71,0xCA4299E4,0x24C5AB07,0x49C32B64,
+			0xB5FE3ACB,0xA1F60489,0xA98E2243,0x257DF714,0xEA3526E6,0x28E1926B,0xF6712B81,
+			0x4620A35D,0xE9437406,0x4520B94B,0xB51E2E8F};
+		const uint32_t descriptors[24]={0,4,8,12,16,20,2,6,10,14,18,22,26,
+			0x00400003,0x00400403,0x00400803,0x00400C03,0x00401003,0x00C01403,0x00402003,
+			0x00402403,0x00402803,0x00402C03,0x01000007};
+		const auto info=w.allocate(ResourceSegment::System,8+24*8);
+		const uint8_t headerBytes[8]={2,6,0,7,24,0,0,12}; w.bytes(info,headerBytes,8);
+		for (unsigned i=0;i<24;++i) { w.u32(info+8+i*8,hashes[i]); w.u32(info+12+i*8,descriptors[i]); }
+		w.u32(at,hash); w.u32(at+4,0x6D657461); w.u64(at+8,p); w.u64(at+16,refs); w.u64(at+32,info);
+		w.u16(at+58,1543); w.u32(at+60,0xFF01);
+	}
+
 	void shader(cRscWriter& w, uint64_t at, const YdrMaterial& material, bool gen9)
 	{
+		if (material.profile==YdrShaderProfile::WeaponNormalSpecDetailPalette)
+		{
+			weaponShader(w,at,material,gen9); return;
+		}
 		const uint64_t textures[3] = { textureReference(w, material.diffuseTexture, gen9),
 			textureReference(w, material.normalTexture, gen9), textureReference(w, material.specularTexture, gen9) };
 		const uint32_t shaderHash = assetNameHash("normal_spec_decal");
@@ -227,8 +353,10 @@ namespace
 		return p;
 	}
 
-	void geometry(cRscWriter& w, uint64_t at, const YdrMesh& mesh, bool gen9)
+	void geometry(cRscWriter& w, uint64_t at, const YdrMesh& mesh, bool gen9,size_t boneCount)
 	{
+		const bool skinned=boneCount!=0;
+		const uint16_t vertexStride=skinned ? 60:52;
 		const auto vb = w.allocate(ResourceSegment::System, gen9 ? 64 : 128);
 		const auto ib = w.allocate(ResourceSegment::System, gen9 ? 64 : 96);
 		const auto decl = w.allocate(ResourceSegment::System, gen9 ? 320 : 16);
@@ -238,10 +366,22 @@ namespace
 		{
 			const auto p = vertices + i * vertexStride;
 			const auto& v = mesh.vertices[i];
-			vec3(w, p, v.position); vec3(w, p + 12, v.normal);
-			w.bytes(p + 24, v.color.data(), 4);
-			w.f32(p + 28, v.uv[0]); w.f32(p + 32, v.uv[1]);
-			vec4(w, p + 36, v.tangent);
+			vec3(w,p,v.position);
+			if (!skinned)
+			{
+				vec3(w,p+12,v.normal); w.bytes(p+24,v.color.data(),4);
+				w.f32(p+28,v.uv[0]); w.f32(p+32,v.uv[1]); vec4(w,p+36,v.tangent);
+			}
+			else if (gen9)
+			{
+				vec3(w,p+12,v.normal); vec4(w,p+24,v.tangent); w.u8(p+40,255); w.u8(p+44,uint8_t(mesh.rigidBone));
+				w.bytes(p+48,v.color.data(),4); w.f32(p+52,v.uv[0]); w.f32(p+56,v.uv[1]);
+			}
+			else
+			{
+				w.u8(p+12,255); w.u8(p+16,uint8_t(mesh.rigidBone)); vec3(w,p+20,v.normal);
+				w.bytes(p+32,v.color.data(),4); w.f32(p+36,v.uv[0]); w.f32(p+40,v.uv[1]); vec4(w,p+44,v.tangent);
+			}
 		}
 		for (size_t i = 0; i < mesh.indices.size(); ++i) w.u16(indices + i * 2, static_cast<uint16_t>(mesh.indices[i]));
 		header(w, vb); header(w, ib); header(w, at);
@@ -251,6 +391,12 @@ namespace
 		w.u16(at + 0x60, static_cast<uint16_t>(mesh.vertices.size()));
 		w.u16(at + 0x62, 3); w.u16(at + 0x70, vertexStride);
 		w.u64(at + 0x78, vertices);
+		if (skinned)
+		{
+			const auto ids=w.allocate(ResourceSegment::System,boneCount*2);
+			for (size_t i=0;i<boneCount;++i) w.u16(ids+i*2,uint16_t(i));
+			w.u64(at+0x68,ids); w.u16(at+0x72,uint16_t(boneCount));
+		}
 		w.u32(ib + 8, static_cast<uint32_t>(mesh.indices.size()));
 		if (gen9)
 		{
@@ -260,11 +406,17 @@ namespace
 			w.u16(ib + 12, 2); w.u32(ib + 16, 0x0058020A); w.u64(ib + 24, indices);
 			w.u64(ib + 48, srv(w));
 			const unsigned slots[5] = { 0, 4, 8, 24, 28 }, offsets[5] = { 0, 12, 36, 24, 28 };
-			const uint8_t sizes[5] = { 12, 12, 16, 4, 8 }, types[5] = { 6, 6, 2, 28, 16 };
+			const uint8_t types[5] = { 6, 6, 2, 28, 16 };
 			for (unsigned i = 0; i < 5; ++i)
 			{
-				w.u32(decl + slots[i] * 4, offsets[i]);
-				w.u8(decl + 208 + slots[i], sizes[i]); w.u8(decl + 260 + slots[i], types[i]);
+				const unsigned offset=skinned ? (i==2 ? 24:i==3 ? 48:i==4 ? 52:offsets[i]):offsets[i];
+				w.u32(decl + slots[i] * 4, offset);
+				w.u8(decl + 208 + slots[i], uint8_t(vertexStride)); w.u8(decl + 260 + slots[i], types[i]);
+			}
+			if (skinned)
+			{
+				w.u32(decl+16*4,40); w.u8(decl+208+16,60); w.u8(decl+260+16,28);
+				w.u32(decl+20*4,44); w.u8(decl+208+20,60); w.u8(decl+260+20,30);
 			}
 			w.u64(decl + 312, (uint64_t(mesh.vertices.size()) << 10) | (uint64_t(vertexStride) << 2));
 		}
@@ -273,8 +425,8 @@ namespace
 			w.u16(vb + 8, vertexStride); w.u64(vb + 16, vertices);
 			w.u32(vb + 24, static_cast<uint32_t>(mesh.vertices.size()));
 			w.u64(vb + 32, vertices); w.u64(vb + 48, decl); w.u64(ib + 16, indices);
-			w.u32(decl, 0x4059); w.u16(decl + 4, vertexStride); w.u8(decl + 7, 5);
-			w.u64(decl + 8, 6ull | (6ull << 12) | (9ull << 16) | (5ull << 24) | (7ull << 56));
+			w.u32(decl, skinned ? 0x405F:0x4059); w.u16(decl + 4, vertexStride); w.u8(decl + 7, skinned ? 7:5);
+			w.u64(decl + 8, 6ull | (skinned ? (9ull<<4)|(9ull<<8):0) | (6ull << 12) | (9ull << 16) | (5ull << 24) | (7ull << 56));
 		}
 	}
 }
@@ -288,6 +440,7 @@ std::vector<uint8_t> buildYdr(const YdrDrawable& drawable, GameGeneration genera
 	cRscWriter w;
 	const auto root = w.allocate(ResourceSegment::System, 208);
 	header(w, root);
+	if (!drawable.skeleton.bones.empty()) w.u64(root+0x18,skeleton(w,drawable.skeleton));
 	w.u64(root + 0xA8, string(w, normalizeAssetName(drawable.name, "Drawable") + ".#dr"));
 	const auto group = w.allocate(ResourceSegment::System, 64);
 	const auto shaders = w.allocate(ResourceSegment::System, drawable.materials.size() * 8);
@@ -316,6 +469,10 @@ std::vector<uint8_t> buildYdr(const YdrDrawable& drawable, GameGeneration genera
 	w.u16(model + 16, static_cast<uint16_t>(n)); w.u16(model + 18, static_cast<uint16_t>(n));
 	w.u64(model + 24, model + boundsOffset); w.u64(model + 32, model + mapOffset);
 	w.u16(model + 44, 0xFF); w.u16(model + 46, static_cast<uint16_t>(n));
+	if (!drawable.skeleton.bones.empty())
+	{
+		w.u8(model+40,uint8_t(drawable.skeleton.bones.size())); w.u8(model+41,1); w.u8(model+45,1);
+	}
 	if (n > 1) aabb(w, model + boundsOffset, bounds);
 	for (size_t i = 0; i < n; ++i)
 	{
@@ -323,7 +480,7 @@ std::vector<uint8_t> buildYdr(const YdrDrawable& drawable, GameGeneration genera
 		w.u16(model + mapOffset + i * 2, drawable.meshes[i].material);
 		w.u64(model + pointerOffset + i * 8, g);
 		aabb(w, model + boundsOffset + (n == 1 ? 0 : i + 1) * 32, meshBounds[i]);
-		geometry(w, g, drawable.meshes[i], gen9);
+		geometry(w, g, drawable.meshes[i], gen9,drawable.skeleton.bones.size());
 	}
 	Vec3 center;
 	double radiusSquared = 0;
@@ -339,7 +496,10 @@ std::vector<uint8_t> buildYdr(const YdrDrawable& drawable, GameGeneration genera
 	w.u32(root + 60, 0x7F800001); w.u32(root + 76, 0x7F800001);
 	w.u64(root + 80, lod);
 	for (unsigned i = 0; i < 4; ++i) w.f32(root + 112 + i * 4, drawable.lodDistance);
-	w.u32(root + 128, 0xFF01);
+	uint32_t buckets=0;
+	for (const auto& material:drawable.materials)
+		buckets|=material.profile==YdrShaderProfile::NormalSpecDecal ? 4:1;
+	w.u32(root + 128, 0xFF00|buckets);
 	if (!gen9)
 	{
 		w.u16(root + 154, static_cast<uint16_t>(modelsSize / 16));

@@ -128,7 +128,8 @@ namespace
 		for (unsigned i = 0; i < 6; ++i) out.push_back(static_cast<uint8_t>(indices >> (8 * i)));
 	}
 
-	std::vector<uint8_t> downsample(const std::vector<uint8_t>& src, uint32_t w, uint32_t h)
+	std::vector<uint8_t> downsample(const std::vector<uint8_t>& src, uint32_t w, uint32_t h,
+		YtdImageSemantic semantic)
 	{
 		const uint32_t nw = std::max(1u, w / 2), nh = std::max(1u, h / 2);
 		std::vector<uint8_t> result(size_t(nw) * nh * 4);
@@ -150,15 +151,33 @@ namespace
 					{
 						const size_t p = (size_t(std::min(h - 1, y * 2 + dy)) * w + std::min(w - 1, x * 2 + dx)) * 4;
 						alpha += src[p + 3];
-						for (unsigned c = 0; c < 3; ++c) rgb[c] += linear[src[p + c]] * src[p + 3];
+						for (unsigned c = 0; c < 3; ++c)
+							rgb[c] += semantic == YtdImageSemantic::ColorSrgb ?
+								linear[src[p + c]] * src[p + 3] :
+								semantic == YtdImageSemantic::TangentNormal ?
+								src[p + c] / 127.5f - 1.0f : float(src[p + c]);
 					}
 				const size_t p = (size_t(y) * nw + x) * 4;
 				result[p + 3] = static_cast<uint8_t>(alpha / 4 + 0.5f);
+				if (semantic == YtdImageSemantic::TangentNormal)
+				{
+					const float length = std::sqrt(rgb[0]*rgb[0] + rgb[1]*rgb[1] + rgb[2]*rgb[2]);
+					if (length > 0.000001f)
+						for (float& c : rgb) c /= length;
+					else { rgb[0] = 0; rgb[1] = 0; rgb[2] = 1; }
+				}
 				for (unsigned c = 0; c < 3; ++c)
 				{
-					float v = alpha > 0 ? rgb[c] / alpha : 0;
-					float s = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1 / 2.4f) - 0.055f;
-					result[p + c] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, s * 255 + 0.5f)));
+					float value;
+					if (semantic == YtdImageSemantic::ColorSrgb)
+					{
+						const float v = alpha > 0 ? rgb[c] / alpha : 0;
+						const float s = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1 / 2.4f) - 0.055f;
+						value = s * 255;
+					}
+					else value = semantic == YtdImageSemantic::TangentNormal ?
+						(rgb[c] + 1) * 127.5f : rgb[c] / 4;
+					result[p + c] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, value + 0.5f)));
 				}
 			}
 		return result;
@@ -202,11 +221,24 @@ namespace
 					encodeColor(block, t.data);
 				}
 			if (gen9 ? (w == 1 && h == 1) : (w == 4 || h == 4)) break;
-			pixels = downsample(pixels, w, h);
+			pixels = downsample(pixels, w, h, image.semantic);
 			w = std::max(1u, w / 2); h = std::max(1u, h / 2);
 		}
 		return t;
 	}
+}
+
+YtdImage downsampleYtdImage(const YtdImage& image)
+{
+	if (!image.width || !image.height || image.width > 4096 || image.height > 4096 ||
+		image.rgba.size() != size_t(image.width) * image.height * 4 ||
+		(image.width & (image.width - 1)) || (image.height & (image.height - 1)))
+		throw std::invalid_argument("Mip input must be RGBA with power-of-two dimensions, 1..4096.");
+	if (image.semantic != YtdImageSemantic::ColorSrgb && image.semantic != YtdImageSemantic::LinearData &&
+		image.semantic != YtdImageSemantic::TangentNormal)
+		throw std::invalid_argument("Unsupported texture semantic.");
+	return { image.name, std::max(1u, image.width / 2), std::max(1u, image.height / 2),
+		downsample(image.rgba, image.width, image.height, image.semantic), image.semantic };
 }
 
 std::vector<uint8_t> buildYtd(const std::vector<YtdImage>& images, GameGeneration generation)
@@ -221,6 +253,9 @@ std::vector<uint8_t> buildYtd(const std::vector<YtdImage>& images, GameGeneratio
 	size_t inputBytes = 0;
 	for (const auto& image : images)
 	{
+		if (image.semantic != YtdImageSemantic::ColorSrgb && image.semantic != YtdImageSemantic::LinearData &&
+			image.semantic != YtdImageSemantic::TangentNormal)
+			throw std::invalid_argument("Unsupported texture semantic.");
 		const auto w = image.width, h = image.height;
 		if (!w || !h || w > 4096 || h > 4096 || (w & (w - 1)) || (h & (h - 1)))
 			throw std::invalid_argument("Texture '" + image.name + "': dimensions must be powers of two, 1..4096.");

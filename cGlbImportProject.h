@@ -1,5 +1,6 @@
 #pragma once
 #include "cGlbImporter.h"
+#include "cSkeleton.h"
 
 enum class GlbPartRole
 {
@@ -49,6 +50,9 @@ struct GlbImportProject
 	std::vector<GlbPartRole> roles;
 	GlbAlignment alignment;
 	std::vector<GlbPivot> pivots;
+	ReferenceSkeleton skeleton;
+	std::string skeletonTemplate;
+	std::vector<int> boneBindings;
 };
 
 const std::vector<GlbRoleInfo>& glbPartRoles();
@@ -61,7 +65,7 @@ std::vector<size_t> includedGlbParts(const GlbModel& model, const GlbImportProje
 void assignGlbPivot(const GlbModel& model, GlbImportProject& project, size_t part, const GlbPivot& pivot);
 
 // Saves drafts too: Unassigned is retained, but cannot pass assignment validation.
-// Saves version 2; accepts version 1 without inventing confirmed alignment/pivots.
+// Saves version 3 with embedded reference skeleton/rig. Accepts versions 1/2.
 // Source-bound by SHA-256; changed GLBs must be imported anew.
 void saveGlbImportProject(const wxString& path, const GlbModel& model, const GlbImportProject& project);
 GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model);

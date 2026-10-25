@@ -129,7 +129,7 @@ void testGlbPlacement(const wxString& output)
 	require(!migrated.pivots[0].confirmed && migrated.pivots[0].position == std::array<float,3>({11,-33,22}),
 		"Legacy pivot uses source transform, not a guessed centre.");
 	saveGlbImportProject(legacyPath, reopened, migrated);
-	require(read(legacyPath).find("version=\"2\"") != std::string::npos, "Legacy projects upgrade on save.");
+	require(read(legacyPath).find("version=\"3\"") != std::string::npos, "Legacy projects upgrade on save.");
 
 	PreviewModel pick;
 	PreviewMesh triangle; triangle.pos = {-1,0,-1, 1,0,-1, 0,0,1}; triangle.idx = {0,1,2};

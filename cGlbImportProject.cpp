@@ -3,6 +3,7 @@
 #include <wx/filename.h>
 #include "cGlbImportProject.h"
 #include "cGlbPlacement.h"
+#include "cGlbRig.h"
 #include "cRscWriter.h"
 #include "vendor/rapidxml/rapidxml_ext.h"
 #include <algorithm>
@@ -25,6 +26,7 @@ namespace
 			fail("Part count does not match the source.");
 		if (project.pivots.size() != model.parts.size()) fail("Pivot count does not match the source.");
 		validateGlbPlacement(project);
+		validateGlbRigData(model,project);
 		std::map<size_t, GlbPartRole> nodes;
 		std::map<size_t, GlbPivot> pivots;
 		for (size_t i = 0; i < project.roles.size(); ++i)
@@ -112,6 +114,16 @@ namespace
 		out << std::setprecision(std::numeric_limits<float>::max_digits10) << value;
 		return out.str();
 	}
+	uint32_t wordNumber(Node* node,const char* key)
+	{
+		const auto text=attr(node,key);
+		if (text.empty() || text.size()>10 || text.find_first_not_of("0123456789")!=std::string::npos)
+			fail("Invalid unsigned 32-bit field.");
+		uint64_t value=0;
+		for (char c:text) value=value*10+uint64_t(c-'0');
+		if (value>std::numeric_limits<uint32_t>::max()) fail("Unsigned field exceeds 32 bits.");
+		return uint32_t(value);
+	}
 	float scalar(Node* node, const char* key)
 	{
 		std::istringstream in(attr(node, key));
@@ -189,6 +201,7 @@ GlbImportProject createGlbImportProject(const GlbModel& model, const wxString& p
 	project.modelName = "w_ar_" + source.GetName().ToStdString();
 	project.weaponTemplate = weaponTemplate;
 	project.roles.assign(model.parts.size(), GlbPartRole::Unassigned);
+	project.boneBindings.assign(model.parts.size(),-1);
 	for (const auto& part : model.parts) project.pivots.push_back(sourcePivot(part));
 	bindings(model, project);
 	return project;
@@ -209,7 +222,11 @@ void assignGlbPartRole(const GlbModel& model, GlbImportProject& project, size_t 
 	for (size_t i = 0; i < model.parts.size(); ++i)
 		if (model.parts[i].nodeIndex == model.parts[part].nodeIndex)
 		{
-			if (project.roles[i] != role) project.pivots[i].confirmed = false;
+			if (project.roles[i] != role)
+			{
+				project.pivots[i].confirmed = false;
+				project.boneBindings[i] = -1;
+			}
 			project.roles[i] = role;
 		}
 }
@@ -259,7 +276,7 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 	Document doc;
 	auto* root = doc.allocate_node(rapidxml::node_element, "glb-import");
 	doc.append_node(root);
-	add(doc, root, "version", "2");
+	add(doc, root, "version", "3");
 	wxFileName source(project.sourcePath);
 	wxFileName destination(path);
 	if (!destination.MakeAbsolute()) fail("Could not resolve project path.");
@@ -275,6 +292,45 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 	vector(doc, alignment, "origin-", project.alignment.origin);
 	vector(doc, alignment, "offset-", project.alignment.offset);
 	add(doc, alignment, "confirmed", project.alignment.confirmed ? "1" : "0");
+	if (!project.skeleton.bones.empty())
+	{
+		auto* skeleton=doc.allocate_node(rapidxml::node_element,"skeleton");
+		root->append_node(skeleton);
+		add(doc,skeleton,"template",project.skeletonTemplate);
+		add(doc,skeleton,"binary-metadata",project.skeleton.binaryMetadata ? "1":"0");
+		add(doc,skeleton,"unknown-1c",std::to_string(project.skeleton.unknown1C));
+		add(doc,skeleton,"unknown-5c",std::to_string(project.skeleton.unknown5C));
+		add(doc,skeleton,"tag-buckets",std::to_string(project.skeleton.tagBucketCount));
+		for (unsigned k=0;k<3;++k)
+		{
+			const auto key="signature-"+std::to_string(k);
+			add(doc,skeleton,doc.allocate_string(key.c_str()),std::to_string(project.skeleton.signatures[k]));
+		}
+		for (size_t i=0; i<project.skeleton.bones.size(); ++i)
+		{
+			const auto& sourceBone=project.skeleton.bones[i];
+			auto* bone=doc.allocate_node(rapidxml::node_element,"bone");
+			skeleton->append_node(bone);
+			add(doc,bone,"index",std::to_string(i)); add(doc,bone,"name",sourceBone.name);
+			add(doc,bone,"tag",std::to_string(sourceBone.tag));
+			add(doc,bone,"parent",std::to_string(sourceBone.parent));
+			add(doc,bone,"sibling",std::to_string(sourceBone.sibling));
+			add(doc,bone,"flags",std::to_string(sourceBone.flags));
+			vector(doc,bone,"translation-",sourceBone.translation);
+			for (unsigned k=0; k<4; ++k)
+			{
+				const auto key=std::string("rotation-")+"xyzw"[k];
+				add(doc,bone,doc.allocate_string(key.c_str()),decimal(sourceBone.rotation[k]));
+				const auto extraKey=std::string("extra-")+"xyzw"[k];
+				add(doc,bone,doc.allocate_string(extraKey.c_str()),decimal(sourceBone.transformExtra[k]));
+			}
+		}
+		for (const auto& pair:project.skeleton.childPairs)
+		{
+			auto* link=doc.allocate_node(rapidxml::node_element,"link");
+			skeleton->append_node(link); add(doc,link,"child",std::to_string(pair[0])); add(doc,link,"parent",std::to_string(pair[1]));
+		}
+	}
 	for (size_t i = 0; i < model.parts.size(); ++i)
 	{
 		auto* part = doc.allocate_node(rapidxml::node_element, "part");
@@ -286,6 +342,7 @@ void saveGlbImportProject(const wxString& path, const GlbModel& model, const Glb
 		vector(doc, part, "pivot-", project.pivots[i].position);
 		vector(doc, part, "axis-", project.pivots[i].axis);
 		add(doc, part, "confirmed", project.pivots[i].confirmed ? "1" : "0");
+		add(doc,part,"bone",std::to_string(project.boneBindings[i]));
 	}
 	std::string xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
 	rapidxml::print(std::back_inserter(xml), doc);
@@ -315,7 +372,7 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 	if (!root) fail("Missing glb-import root.");
 	attributes(root, {"version", "source", "sha256", "model", "template"});
 	const auto version = attr(root, "version");
-	if (version != "1" && version != "2") fail("Unsupported import project version.");
+	if (version != "1" && version != "2" && version != "3") fail("Unsupported import project version.");
 	GlbImportProject project;
 	const auto sourceText = attr(root, "source");
 	wxFileName source(wxString::FromUTF8(sourceText));
@@ -329,10 +386,11 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 	metadata(project);
 	GlbModel loaded = loadGlb(project.sourcePath);
 	bool hasAlignment = false;
+	bool hasSkeleton = false;
 	for (auto* node = root->first_node(); node; node = node->next_sibling())
 	{
 		if (node->type() == rapidxml::node_comment) continue;
-		if (version == "2" && node->type() == rapidxml::node_element && std::string(node->name()) == "alignment")
+		if (version != "1" && node->type() == rapidxml::node_element && std::string(node->name()) == "alignment")
 		{
 			if (hasAlignment || node->first_node()) fail("Expected exactly one empty alignment element.");
 			attributes(node, {"scale", "rotation-x", "rotation-y", "rotation-z", "origin-x", "origin-y", "origin-z",
@@ -345,11 +403,72 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 			hasAlignment = true;
 			continue;
 		}
+		if (version=="3" && node->type()==rapidxml::node_element && std::string(node->name())=="skeleton")
+		{
+			if (hasSkeleton) fail("Duplicate skeleton element.");
+			hasSkeleton=true;
+			attributes(node,{"template","binary-metadata","unknown-1c","unknown-5c","tag-buckets",
+				"signature-0","signature-1","signature-2"});
+			project.skeletonTemplate=attr(node,"template");
+			project.skeleton.binaryMetadata=flag(node,"binary-metadata");
+			project.skeleton.unknown1C=wordNumber(node,"unknown-1c");
+			const auto unknown5C=wordNumber(node,"unknown-5c"), buckets=wordNumber(node,"tag-buckets");
+			if (unknown5C>65535 || buckets>1024) fail("Invalid skeleton runtime field.");
+			project.skeleton.unknown5C=uint16_t(unknown5C); project.skeleton.tagBucketCount=uint16_t(buckets);
+			for (unsigned k=0;k<3;++k)
+			{
+				const auto key="signature-"+std::to_string(k);
+				project.skeleton.signatures[k]=wordNumber(node,key.c_str());
+			}
+			for (auto* bone=node->first_node(); bone; bone=bone->next_sibling())
+			{
+				if (bone->type()==rapidxml::node_comment) continue;
+				if (bone->type()==rapidxml::node_element && std::string(bone->name())=="link" && !bone->first_node())
+				{
+					attributes(bone,{"child","parent"});
+					const auto child=number(attr(bone,"child")),parent=number(attr(bone,"parent"));
+					if (child>255 || parent>255 || project.skeleton.childPairs.size()>=4096) fail("Invalid skeleton child pair.");
+					project.skeleton.childPairs.push_back({uint16_t(child),uint16_t(parent)});
+					continue;
+				}
+				if (bone->type()!=rapidxml::node_element || std::string(bone->name())!="bone" || bone->first_node())
+					fail("Expected empty bone elements.");
+				attributes(bone,{"index","name","tag","parent","sibling","flags","translation-x","translation-y","translation-z",
+					"rotation-x","rotation-y","rotation-z","rotation-w","extra-x","extra-y","extra-z","extra-w"});
+				if (project.skeleton.bones.size()>=256 || number(attr(bone,"index"))!=project.skeleton.bones.size())
+					fail("Bone index/order is inconsistent.");
+				SkeletonBone entry;
+				entry.name=attr(bone,"name");
+				const auto tag=number(attr(bone,"tag"));
+				if (tag>65535) fail("Bone tag out of range.");
+				entry.tag=uint16_t(tag);
+				const auto parent=attr(bone,"parent");
+				entry.parent=parent=="-1" ? -1 : int(number(parent));
+				const auto sibling=attr(bone,"sibling");
+				entry.sibling=sibling=="-1" ? -1 : int(number(sibling));
+				const auto flags=wordNumber(bone,"flags");
+				if (flags>65535) fail("Invalid bone flags.");
+				entry.flags=uint16_t(flags);
+				entry.translation=vector(bone,"translation-");
+				for (unsigned k=0; k<4; ++k)
+				{
+					const auto key=std::string("rotation-")+"xyzw"[k];
+					entry.rotation[k]=scalar(bone,key.c_str());
+					const auto extraKey=std::string("extra-")+"xyzw"[k];
+					entry.transformExtra[k]=scalar(bone,extraKey.c_str());
+				}
+				project.skeleton.bones.push_back(std::move(entry));
+			}
+			validateReferenceSkeleton(project.skeleton);
+			continue;
+		}
 		if (node->type() != rapidxml::node_element || std::string(node->name()) != "part" || node->first_node())
 			fail("Expected empty part elements.");
 		if (version == "1") attributes(node, {"index", "node", "primitive", "role"});
-		else attributes(node, {"index", "node", "primitive", "role", "pivot-x", "pivot-y", "pivot-z",
+		else if (version=="2") attributes(node, {"index", "node", "primitive", "role", "pivot-x", "pivot-y", "pivot-z",
 			"axis-x", "axis-y", "axis-z", "confirmed"});
+		else attributes(node, {"index", "node", "primitive", "role", "pivot-x", "pivot-y", "pivot-z",
+			"axis-x", "axis-y", "axis-z", "confirmed","bone"});
 		const auto i = number(attr(node, "index"));
 		if (i != project.roles.size() || i >= loaded.parts.size() ||
 			number(attr(node, "node")) != loaded.parts[i].nodeIndex ||
@@ -361,15 +480,17 @@ GlbImportProject loadGlbImportProject(const wxString& path, GlbModel& model)
 		if (found == glbPartRoles().end()) fail("Unknown saved part role.");
 		project.roles.push_back(found->role);
 		auto pivot = sourcePivot(loaded.parts[i]);
-		if (version == "2")
+		if (version != "1")
 		{
 			pivot.position = vector(node, "pivot-");
 			pivot.axis = vector(node, "axis-");
 			pivot.confirmed = flag(node, "confirmed");
 		}
 		project.pivots.push_back(pivot);
+		const auto bone=version=="3" ? attr(node,"bone") : "-1";
+		project.boneBindings.push_back(bone=="-1" ? -1 : int(number(bone)));
 	}
-	if (version == "2" && !hasAlignment) fail("Missing alignment element.");
+	if (version != "1" && !hasAlignment) fail("Missing alignment element.");
 	bindings(loaded, project);
 	model = std::move(loaded);
 	return project;

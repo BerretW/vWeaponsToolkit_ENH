@@ -100,6 +100,11 @@ void validateGlbPlacement(const GlbImportProject& project)
 
 std::array<float, 3> glbAlignedPoint(const GlbAlignment& a, const V3& p) { return Transform(a).forward(p); }
 std::array<float, 3> glbSourcePoint(const GlbAlignment& a, const V3& p) { return Transform(a).inverse(p); }
+std::array<float, 3> glbAlignedDirection(const GlbAlignment& a,const V3& p)
+{
+	for (float x:p) finite(x);
+	return Transform(a).direction(p);
+}
 
 std::vector<std::string> glbPlacementErrors(const GlbModel& model, const GlbImportProject& project)
 {
@@ -164,6 +169,6 @@ PreviewModel makePreparedGlbPreview(const GlbModel& model, const GlbImportProjec
 		view.markers.push_back({transform.forward(pivot.position), transform.direction(unit(pivot.axis)), "Pivot (rest)", false});
 	}
 	view.markers.push_back({{0,0,0}, {1,0,0}, "Output origin", true});
-	view.info += " | aligned (not rigged)";
+	view.info += " | aligned rest geometry";
 	return view;
 }

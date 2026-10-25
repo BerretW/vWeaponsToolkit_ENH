@@ -15,6 +15,10 @@
 void testGlbImporter(const wxString& output);
 void testGlbImportProjects(const wxString& repo, const wxString& output);
 void testGlbPlacement(const wxString& output);
+void testGlbRig(const wxString& repo,const wxString& output);
+void runGlbMaterialTests();
+void testWeaponResource(const wxString& repo);
+void testPreviewPerformance(const wxString& repo,const wxString& output);
 
 class ResourceWriterTestApp : public wxApp
 {
@@ -214,6 +218,7 @@ namespace
 
 int main(int argc, char** argv)
 {
+	std::cout.setf(std::ios::unitbuf);
 	try
 	{
 		wxInitializer wx;
@@ -227,6 +232,10 @@ int main(int argc, char** argv)
 		testGlbImporter(output);
 		testGlbImportProjects(repo, output);
 		testGlbPlacement(output);
+		testGlbRig(repo,output);
+		runGlbMaterialTests();
+		testWeaponResource(repo);
+		testPreviewPerformance(repo,output);
 		testContainer(64, 0, path("system_only.rsc"));
 		testContainer(8192, 8193, path("page_growth.rsc"));
 		testContainer(48, 16 * 1024 * 1024 + 1, path("large_page.rsc"));

@@ -1,10 +1,11 @@
 # Weapon GLB source structure
 
 This is the proposed authoring contract for the GLB-to-weapon workflow.
-**Static inspection, part-role assignment, alignment/pivot preparation and resumable import projects are
-implemented; game conversion is not.** The names below
-describe authoring roles, not GTA bone names or an implemented automatic
-component exporter. Keep the original authoring file for later rigging.
+**Inspection, roles, alignment/pivots, reference skeleton binding and dual-
+generation resource generation are implemented for the supported opaque,
+rigidly skinned profile. In-game behavior is not yet verified.** The names below
+describe authoring roles, not GTA bone names. Keep the original authoring
+file for later changes; the converter does not replace the authoring scene.
 
 ## Recommended hierarchy
 
@@ -190,28 +191,76 @@ do not accumulate transformations. Global normals rotate without scale.
 Confirmations are author decisions, **not** real GTA bone bindings or proof
 of a working reload/trigger animation.
 
-## Later rig/component stage
+## Reference skeleton binding
+
+After alignment, **Next: bind bones** opens the reference step. Load a real
+gen8/gen9 weapon `.ydr` matching the selected weapon template. The application
+reads bone names, tags, parent hierarchy, local quaternion/translation and
+runtime metadata directly from the binary file. Unit scale and a valid
+topologically ordered hierarchy are required. Loading a reference **clears
+previous bone mappings** and declares it belongs to the selected template;
+the toolkit cannot verify that claim from the filename alone.
+
+Select an included source object and choose its actual bone in the menu.
+All its material primitives share one bone at **100% weight**. Original
+aligned geometry is preserved in rest pose; inverse bind matrices provide
+the bone-local relationship. This is rigid skinning, not automatic smooth
+weight painting.
+
+Suggestions apply only to unbound objects and only when the named bone
+exists: Body -> `Gun_Main_Bone`, Magazine -> `WAPClip`, Trigger ->
+`Gun_Trigger`, and the corresponding WAP bones for optional roles. Bolt,
+charging handle and generic moving parts remain explicit decisions;
+`Gun_Cock1` and `Gun_Breach` are real distinct bones in the supplied reference,
+not interchangeable labels.
+
+The bone test uses the reference bone's local axis and propagates to **all
+bound objects on that bone and its descendants**. It is not a sampled GTA
+animation clip. The selected reference origin/axis is overlaid, and the
+distance from your confirmed object pivot is shown in millimetres.
+
+**Move bone origin to confirmed pivot** updates the assigned reference
+bone's local translation to that aligned point. Direct children retain
+their world rest origins, so unrelated attachments do not get dragged
+along. Mesh rest coordinates stay untouched and binding matrices are rebuilt.
+Rotations, names, tags, parent hierarchy and reference runtime tables are
+retained. Multiple objects bound to that bone share its new origin; inspect
+the result rather than repeatedly moving a shared bone for each object.
+The root cannot be moved this way; use alignment for the whole weapon.
+
+Changing a role clears its bone binding. Changing the weapon template
+requires a new reference declaration; stale bindings cannot pass validation.
+The reference skeleton is embedded in saved version-3 projects, so reopening
+does not depend on the old reference path.
+
+## Export and current component limits
 
 For a first working version, prepare a **static, assembled, unskinned**
 GLB with this separation. Do not merge the magazine/slide/components into
-the body just to make import succeed. The future weapon-profile step needs
-to map these roles to the selected template's real bones, bind transforms,
-attachment points and component definitions, then generate appropriate LODs
-and gen8/gen9 assets.
+the body just to make import succeed. Bind the intended moving parts to
+actual template bones. A skeleton cannot supply game animations for newly
+invented mechanisms; custom animation clips remain outside this converter.
+Magazine, opaque scope and grip export as separate attached models; automatic
+LODs and specialized suppressor/flashlight helper-rig support remain future
+work. Those specialized roles fail resource export explicitly, rather than
+silently becoming permanent body geometry.
 
 Today, use **Import GLB...** on the first tab or **Tools > Import GLB / open
-preparation project...**. The four steps are:
+preparation project...**. The five steps are:
 
 1. Inspect the source.
 2. Assign every source object a role or explicitly exclude it. At least one
    must be **Body / fixed detail**. Select the planned template/model name.
 3. Align the model and confirm moving-part/magazine pivots.
-4. Review the aligned included assembly in rest pose and save the project.
+4. Load a reference skeleton and bind every included source object.
+5. Review the rest assembly and save a project or export Legacy + Enhanced
+   resources into a new directory.
 
 You can save unfinished assignments too. **Save project...** writes
 `<name>.vwtimport.xml`, a versioned XML file referencing the GLB, its SHA-256,
 source node/primitive identities, semantic roles, model name, planned
-template, alignment and per-object pivots/axes/confirmation flags.
+template, alignment, per-object pivots/axes/confirmation flags and an embedded
+reference skeleton snapshot with actual bone mappings.
 It is **not** a FiveM resource and must not go into `stream`.
 Reopen it through Import GLB. Source paths are relative to the project
 folder where possible (absolute across Windows drives); moving the project
@@ -220,15 +269,69 @@ roles and inconsistent/duplicate part identities are rejected, not guessed.
 The GLB itself remains untouched. Save validation failures do not truncate
 an existing project.
 
-New projects use version 2. Existing version-1 files are still accepted:
+New projects use version 3. Existing version-1 files are still accepted:
 roles/template/name are preserved, alignment starts as unconfirmed identity,
 and pivots start at unconfirmed source-world origins. Saving upgrades to
-version 2; keep a copy if you need to open it in an older toolkit build.
+version 3. Version-2 files retain their alignment/pivots. Both old versions
+start without a reference skeleton; no bone mapping is invented.
+Keep a copy if you need to open a project in an older toolkit build.
 Invalid scales, non-finite/out-of-range values, non-unit axes, duplicate
 alignment elements and inconsistent per-object pivots are rejected.
 
-The wizard does not alter the current weapon configuration or export files.
-Static YDR serialization
-exists as a separate backend, but GLB-to-game-shader/rig/resource conversion
-is not yet connected. Neither inspection nor binary round-trip tests replace
-an in-game FiveM test.
+The wizard does not alter the legacy main-window weapon configuration.
+Export builds new YDR/YTD files, an opaque weapon shader, rigid skin buffers,
+reference skeleton and metadata copied/adapted from the selected template.
+Magazine/scope/grip geometry is removed from the base model and exported
+separately, transformed into attachment space, with its own YDR/YTD and
+matching custom component metadata/archetypes. Every exported component
+actually contains its declared local root anchor: it is root-weighted with
+the retained reference skeleton, not a static file relying on an unverified
+missing-AAP-bone fallback. No stock model/clip dependency is silently kept.
+All pieces of one component role must share one attachment bone.
+This still requires an in-game check of magazine detachment/reload behavior,
+normal decoding, palette/tint behavior and animation alignment.
+
+GLB base color, scaled tangent normals and metallic-roughness are converted
+under the explicit approximation policy in [README.md](README.md). Unsupported
+alpha/PBR features fail, not silently vanish. Tangents are generated, and
+collapsed UV triangles produce a geometric basis **with diagnostics** because
+the source provides no unique tangent frame. Large generated primitives
+are split on triangle boundaries. Only high LOD is generated.
+
+The output parent must exist; the destination itself must not exist.
+Conversion and metadata are built before staging, then the new directory
+is published atomically. `conversion-report.txt` lists limitations. Use the
+Legacy **or** Enhanced resource on a server, never both.
+The emitted client validator checks asset loading and component registrations
+automatically on resource start, without equipping weapons. Its structured
+log can be verified with `tests\verify_fivem_log.py`. It does not validate
+animation quality, lighting or appearance.
+
+## Noninteractive operation and completion checks
+
+For interactive use, follow the highlighted five-step route. Read the
+short instruction and completion counters above the object list.
+**Show next unfinished object** jumps to an unresolved role/pivot/binding
+instead of requiring manual list searching. **Explain this step...**
+defines the fields, why they matter, and how to finish the current stage.
+Back preserves preparation; Save project is available for drafts throughout.
+
+Preview camera movement uses coalesced low-resolution frames and returns
+to full viewport resolution after a short idle delay. GLB preview textures
+are512px proxies only; source GLB data and the separately decoded export
+textures remain unchanged. Point picking uses full geometry, not the
+low-resolution bitmap or a reduced triangle mesh.
+
+`vwt-convert.exe` beside the app provides import inspection, project creation,
+explicit role/placement/pivot/bone configuration, staged validation and
+dual-generation export without dialogs. Its `--help` lists exact arguments;
+the CLI and GUI share the same native functions. JSON output and stable exit
+codes support agent-driven workflows and repeatable tests. See the command
+examples and `tests\verify_converter_cli.py` instructions in [README.md](README.md).
+
+Offline completion checks cover actual M4A1 conversion, serialized skeleton
+names/tags/hierarchy/inverse binds, shader descriptors checked against both
+generation fixtures, normalized skin weights, metadata references, rollback
+and project/source preservation. Synthetic test placement is explicitly not
+the author's hand-calibrated result. Neither structural checks nor a
+temporary bone-motion preview replace an in-game FiveM test.

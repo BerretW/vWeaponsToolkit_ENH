@@ -42,12 +42,22 @@
     <ClCompile Include="GlbImporterTests.cpp" />
     <ClCompile Include="GlbImportProjectTests.cpp" />
     <ClCompile Include="GlbPlacementTests.cpp" />
+    <ClCompile Include="GlbRigTests.cpp" />
+    <ClCompile Include="GlbMaterialTests.cpp" />
+    <ClCompile Include="WeaponResourceTests.cpp" />
+    <ClCompile Include="PreviewPerformanceTests.cpp" />
     <ClCompile Include="..\cRscWriter.cpp" />
     <ClCompile Include="..\cYtdWriter.cpp" />
     <ClCompile Include="..\cYdrWriter.cpp" />
     <ClCompile Include="..\cGlbImporter.cpp" />
     <ClCompile Include="..\cGlbImportProject.cpp" />
     <ClCompile Include="..\cGlbPlacement.cpp" />
+    <ClCompile Include="..\cSkeleton.cpp" />
+    <ClCompile Include="..\cGlbRig.cpp" />
+    <ClCompile Include="..\cGlbMaterials.cpp" />
+    <ClCompile Include="..\cGlbAssetBuilder.cpp" />
+    <ClCompile Include="..\cGlbResourceExporter.cpp" />
+    <ClCompile Include="..\cWeaponResource.cpp" />
     <ClCompile Include="..\cGlbImportDialog.cpp" />
     <ClCompile Include="..\cModelPreview.cpp" />
   </ItemGroup>

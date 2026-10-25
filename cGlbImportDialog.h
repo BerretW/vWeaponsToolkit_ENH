@@ -19,6 +19,10 @@ private:
 	bool changingSelection = false;
 	bool motionRendered = false;
 	wxStaticText* heading;
+	wxStaticText* progress;
+	wxStaticText* stepInstructions;
+	wxStaticText* readiness;
+	wxButton* nextIncomplete;
 	wxListCtrl* parts;
 	cModelPreviewPanel* preview;
 	wxPanel* assignmentPanel;
@@ -37,6 +41,16 @@ private:
 	wxChoice* axisChoice;
 	wxSlider* motionSlider;
 	wxStaticText* placementStatus;
+	wxPanel* rigPanel;
+	wxChoice* boneChoice;
+	wxChoice* rigAxis;
+	wxSlider* rigMotion;
+	wxStaticText* rigStatus;
+	wxPanel* exportPanel;
+	wxTextCtrl* resourceName;
+	wxTextCtrl* weaponId;
+	wxButton* exportButton;
+	int selectedReferenceBone = -1;
 
 	void setStage(int value);
 	void selectPart(long row);
@@ -51,4 +65,11 @@ private:
 	void applyPlacement(bool confirmAlignment = false, bool confirmPivot = false);
 	void applyPlacementFromUi(bool confirmAlignment = false, bool confirmPivot = false);
 	void pickedPoint(const std::array<float, 3>& point);
+	void buildRigPanel(wxBoxSizer* layout);
+	void refreshRig();
+	void refreshRigPreview();
+	void exportResources();
+	void refreshGuidance();
+	void showStepHelp();
+	void focusNextIncomplete();
 };

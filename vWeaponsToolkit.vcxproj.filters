@@ -57,6 +57,24 @@
     <ClInclude Include="cGlbPlacement.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cSkeleton.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cGlbRig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cGlbMaterials.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cGlbAssetBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cGlbResourceExporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cWeaponResource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="cGlbImportDialog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -99,6 +117,24 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cGlbPlacement.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cSkeleton.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbRig.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbMaterials.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbAssetBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cGlbResourceExporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cWeaponResource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cGlbImportDialog.cpp">

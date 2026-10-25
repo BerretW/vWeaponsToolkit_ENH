@@ -38,7 +38,7 @@ A tool that allows the creation of add-on weapons & add-on components with ease 
 
 ### FiveM Enhanced (GTA V Enhanced / gen9)
 
-Legacy `.ydr/.ytd/.yft/.ydd` files do **not** load on FiveM Enhanced; they must be converted to gen9 first (Cfx **Alchemist**, **CodeWalker** Tools > Asset Converter, or **Sollumz** 2.8+ export). The manifest and `.meta` files are the same for both. The toolkit does not convert models itself:
+Legacy `.ydr/.ytd/.yft/.ydd` files do **not** load on FiveM Enhanced; they must be converted to gen9 first (Cfx **Alchemist**, **CodeWalker** Tools > Asset Converter, or **Sollumz** 2.8+ export). The manifest and `.meta` files are the same for both. This existing-asset Export tab expects preconverted gen9 files; the separate GLB wizard below can generate both formats natively:
 
 1. Convert your model files and put the results in one folder, keeping the **same file names** as the originals.
 2. On the Export tab tick *Also export FiveM Enhanced (gen9) resource* and select that folder.
@@ -73,18 +73,16 @@ does not resize images silently. It builds the dictionary before saving and
 uses a temporary file so a failed conversion does not truncate an existing
 output file.
 
-**This is not yet the GLB-to-resource workflow.** GLB export integration, PBR material
-mapping, skeletons, component attachment points and LOD generation remain
-to be implemented. The new `.ytd` writer is checked by
+This standalone PNG command is diffuse-only. The GLB workflow below has its
+own normal/data-map conversion path. The `.ytd` writer is checked by
 native round-trip tests and an independent Python reader against both
 generations of the supplied assets; in-game validation is still required.
 
-### Built-in converter: static drawable backend milestone
+### Native drawable and weapon conversion
 
 The native `buildYdr` API in [cYdrWriter.h](cYdrWriter.h) now creates binary
 `.ydr` files for **Legacy (gen8)** and **Enhanced (gen9)** without an external
-converter. This is a backend for the GLB conversion pipeline, **not yet
-connected to a GUI YDR export command**.
+converter. The GLB wizard and `vwt-convert.exe` use the same backends.
 
 - Supports multiple indexed triangle meshes and materials, positions, normals,
   vertex colors, UVs and tangent handedness.
@@ -94,13 +92,13 @@ connected to a GUI YDR export command**.
   meshes must be split by the caller; indices are validated before conversion
   to 16 bits. Invalid vectors, triangles, material references and oversized
   inputs are rejected explicitly.
-- Currently supports only the verified **`normal_spec_decal`** material
-  profile (render bucket 2), with diffuse, normal and specular texture
-  references. It is not a general opaque weapon/PBR material converter.
-  Normal/specular maps must come from an appropriate texture pipeline; the
-  diffuse-only PNG command above must not be used to generate them.
-- Produces static high-LOD geometry only: no skeleton, bone weights, component
-  attachment points, collision or automatic LODs, and no embedded textures.
+- Supports static `normal_spec_decal` and the fixture-verified opaque
+  `weapon_normal_spec_detail_palette` binary shader profiles. This is not
+  general support for every GTA shader.
+- Supports a supplied gen8/gen9 reference skeleton, its real names/tags/
+  hierarchy/runtime tables, inverse bind matrices and rigid one-bone-per-
+  object weights. It does not invent animation clips or missing bones.
+- High LOD only: no collision/automatic LOD generation or embedded textures.
 
 Native tests generate models for both generations and load them back through
 the preview reader. An independent Python reader checks vertex attributes,
@@ -108,11 +106,20 @@ indices, material mappings, bounds, declarations and shader buffer/resource
 layouts, including the 65,535-vertex boundary. Gen9 shader metadata is also
 compared with the supplied model fixture.
 
-**GLB export integration, weapon-specific opaque material profiles, rigging and integration
-with resource export remain unfinished.** These generated drawables have not
-yet been validated in GTA/FiveM; a binary round trip is not an in-game test.
+**Generated resources have not yet been validated in GTA/FiveM.** In particular
+the separate magazine's reload/detachment behavior, game animations, normal
+map decoding and palette/tint behavior need a real game test. Specialized
+suppressor/flashlight helper rigs remain unsupported and are rejected explicitly.
 
 ### GLB import and model preparation
+
+The wizard shows the full five-step route at the top, a short **what/why**
+instruction for the current step and live counts of unfinished assignments,
+pivots or bone bindings. **Show next unfinished object** selects and scrolls
+to the next unresolved item (or focuses the missing alignment/reference
+action). **Explain this step...** provides detailed instructions without
+leaving the wizard. Save project stores editable work; Export creates game
+files. Neither action silently substitutes for the other.
 
 Use **Import GLB...** on the first tab or **Tools > Import GLB / open
 preparation project...**:
@@ -139,17 +146,44 @@ preparation project...**:
    points inside/off the surface. Rotate/slide testing is temporary; reset
    it before picking. Magazine/bolt/trigger/charging-handle/other-moving-part
    objects require pivot confirmation before review.
-4. Press **Next: review**. The review shows the aligned included assembly
-   in rest pose, object-role counts, size in metres and remaining work.
-   **Back** preserves roles, transforms and pivots.
-5. **Save project...** stores a draft or completed preparation as
+4. Press **Next: bind bones**. Load a reference **weapon `.ydr`** matching
+   the chosen template. No XML/Blender/converter is needed at runtime.
+   For the supplied fixture, choose `test\gen8\w_ar_carbinerifle_m31.ydr`
+   or its gen9 counterpart and the CARBINERIFLE template.
+   Assign each included object to a bone from the dropdown. Suggestions
+   fill only unbound objects and only known matching bone names. Bolt,
+   charging-handle and other moving-part mappings require an explicit choice.
+   Test rotation affects the selected bone **and its descendants**, unlike
+   the individual-object pivot test. The displayed pivot-distance helps
+   spot alignment differences. **Move bone origin to confirmed pivot**
+   adjusts that bone's rest origin while preserving child world positions
+   and the authored mesh rest pose; review this explicitly.
+   With **All parts** selected, the bone dropdown can inspect auxiliary
+   muzzle/ejection/attachment bones too. Arm **Pick reference bone origin**
+   and right-click a surface to move its origin; child origins stay fixed.
+   The CLI `bone-origin` command also allows points off the surface.
+5. Press **Next: review**. Inspect the rest assembly, counts and sizes.
+   Set a unique resource name and weapon ID, then **Export Legacy + Enhanced
+   resources...**. A new `<resource>_converted` folder contains `<resource>`
+   and `<resource>_enhanced`, each with YDR/YTD, manifest, Lua names and meta.
+   Magazine, opaque scope and grip roles are exported as separate models,
+   own dictionaries, custom component metadata and default attachments.
+   The base model does not contain a duplicate of the component geometry.
+   Export never overwrites an existing destination. Use only one generation
+   on a server. **Back** preserves preparation data.
+6. **Save project...** stores a draft or completed preparation as
    `<name>.vwtimport.xml`. Keep this filename suffix. Reopen it through the
    same Import GLB button. The project references the original GLB and
    checks its SHA-256; it does not embed or modify the model. Keep the source
    GLB with the project. A re-exported/changed GLB needs a new import.
-   New saves use project version 2. Version-1 projects retain their roles
+   New saves use project version 3, embedding the reference skeleton snapshot
+   and bone bindings, so the original reference YDR is not required to reopen.
+   Changing a part role clears that object's bone mapping. Changing the
+   weapon template requires reloading a reference for the new template.
+   Version-1 projects retain their roles
    and load with identity alignment and unconfirmed source-origin pivots;
-   no calibration is invented. Re-saving upgrades them to version 2.
+   no calibration is invented. Version-2 projects keep alignment/pivots.
+   Both old versions start without a reference skeleton or bone mappings.
 
 Your existing weapon configuration and `.ydr/.ytd` export are not changed.
 Closing a changed project asks whether to save it.
@@ -161,17 +195,120 @@ Mirrored/nonuniform transforms are handled explicitly. Missing normals
 generate flat faces; missing tangents and preview limitations are reported.
 Unsupported inputs fail with a diagnostic rather than dropping meshes.
 
-**These are preparation steps, not GLB-to-resource export.** There is no
-automatic PBR-to-GTA material conversion, rigging or component generation.
-Saved roles are semantic authoring roles, not actual GTA bone assignments.
-The planned template is recorded in the project, not applied as a rig.
+Semantic roles and actual reference-bone mappings are separate. The supplied
+skeleton is declared to belong to the selected template by the author; the
+tool cannot establish animation compatibility from the filename alone.
 Placement is non-destructive: output = offset + Rz*Ry*Rx*(scale*(source-anchor)).
 Original GLB vertices are never overwritten, and test poses are never saved.
 Confirmations record your authoring decisions, not in-game verification.
 The preview is base-color/basic lighting only, not PBR/alpha rendering.
+For responsiveness, imported GLB preview textures are capped at512 pixels
+on their longest side; export reads the original embedded images independently.
+Camera events are coalesced on a16ms timer. During rotation/zoom/resize the
+software renderer uses at most360 pixels on the longest side, then restores
+full viewport resolution after120ms idle. Geometry and picking are not
+decimated; pending camera updates are flushed before a point is picked.
+Linear-light vertex-color modulation uses lookup tables (tested within one
+RGB byte of the direct calculation) rather than per-pixel power functions.
 See [MODEL_IMPORT.md](MODEL_IMPORT.md) for limits and the proposed authoring
 hierarchy: fixed body together, moving parts and removable components
 separate, meaningful origins/pivots and future attachment markers.
+
+### Material policy and current export limits
+
+GLB export accepts **OPAQUE metallic-roughness** materials, embedded PNG/JPEG,
+UV0 without texture transforms and repeat wrapping. It validates original
+glTF metadata, not just the reduced inspection fields. MASK/BLEND,
+double-sided/unlit/unsupported PBR extensions and separate AO maps fail
+explicitly. Shared occlusion in the metallic-roughness texture's red channel
+is baked into linear diffuse using occlusion strength.
+
+- Base color factors are baked in linear light, then encoded as sRGB.
+- Normal maps use their glTF scale and are renormalized; no green inversion
+  is applied. Normal mips renormalize; data/spec mips stay linear.
+- Metallic/roughness is an **artistic approximation**, not PBR equivalence:
+  grayscale spec = `(0.04 + 0.96 * metallic) * (1 - 0.75 * roughness)`.
+- Neutral detail normal and white palette textures with
+  `detailSettings=(0,0,1,1)` are explicit profile choices. Their in-game
+  visual neutrality is not proven by binary structural tests.
+- Export uses power-of-two textures, default maximum **1024**, minimum4.
+  CLI can request 4..4096. Oversized textures are explicitly box-filtered
+  by color/normal/data semantic; no arbitrary image distortion is performed.
+- Supplied tangents are retained and rotated with alignment; missing
+  tangents are generated per triangle, preserving UV handedness. Meshes
+  above 65,535 generated vertices are split at triangle boundaries.
+  Collapsed UVs have no unique normal-map orientation: a deterministic
+  geometric tangent basis is generated with an explicit per-part diagnostic.
+- Magazine/Scope/Grip roles become separate component models, using their
+  actual reference WAP bone and a real component-local root anchor.
+  All pieces of one role must share the same attachment bone; one assembled
+  variant per role is supported. Default components are enabled in metadata.
+- Suppressor/Flashlight export is blocked until compatible component-specific
+  muzzle/bulb rigs are supplied through a supported workflow. The weapon's
+  skeleton alone cannot prove those helpers exist. Do not relabel them as
+  Body to bypass this. Transparent scopes also remain outside OPAQUE support.
+
+`conversion-report.txt` records the policy and limitations next to the
+generated resources. A completed conversion is not a claim of an in-game test.
+Each resource includes `vwt_validate.lua`: on client resource start it
+nonintrusively requests the weapon/component assets and logs structured
+`[vwt-validation]` results. It does not equip weapons or change the player.
+Check a captured client log with
+`python tests\verify_fivem_log.py <log> <resource>`.
+Missing/failing records are errors, not assumed success. Even a passing
+runtime asset check does not validate animation alignment or appearance.
+
+### Autonomous / command-line operation
+
+Release builds also produce **`vwt-convert.exe`**, using the same native
+import/project/rig/material/resource code without dialogs. Run it from any
+working directory. It uses `templates` beside the executable. All mutations
+are explicit commands, JSON goes to stdout, errors to stderr; exit codes
+are **0 success, 1 error, 2 incomplete validation**.
+
+```powershell
+.\x64\Release\vwt-convert.exe --help
+.\x64\Release\vwt-convert.exe inspect-glb .\test\m4a1.glb
+.\x64\Release\vwt-convert.exe create .\test\m4a1.glb C:\work\m4.vwtimport.xml WEAPON_CARBINERIFLE w_ar_m4a1
+.\x64\Release\vwt-convert.exe roles C:\work\m4.vwtimport.xml --suggest
+.\x64\Release\vwt-convert.exe inspect-project C:\work\m4.vwtimport.xml
+```
+
+Use source **node indices** from inspection, not list row numbers:
+`roles project NODE role-id`, `bind project NODE bone-index`.
+`align project SCALE RX RY RZ ORIGIN_X ORIGIN_Y ORIGIN_Z OFFSET_X OFFSET_Y OFFSET_Z --confirm`
+and `pivot project NODE PX PY PZ AX AY AZ --confirm` set placement explicitly.
+`reference project reference.ydr`, `bind project --suggest`,
+`fit-bone project NODE`, `bone-origin project BONE_INDEX OUTPUT_X OUTPUT_Y OUTPUT_Z`,
+and `validate project assignments|placement|rig`
+complete the programmable preparation. Existing assignments are not overwritten
+by suggestions. No command silently confirms a guessed pivot or alignment.
+
+```powershell
+.\x64\Release\vwt-convert.exe validate C:\work\m4.vwtimport.xml rig
+if ($LASTEXITCODE -ne 0) { throw "Preparation incomplete" }
+.\x64\Release\vwt-convert.exe export C:\work\m4.vwtimport.xml C:\work\new_output m4a1 WEAPON_CUSTOM_M4A1 1024
+```
+
+The final directory must not exist; its parent must exist. Output is staged
+and atomically published only after both generations and metadata are built.
+The source GLB is never modified. Scripted fixtures use synthetic placement
+for structural tests and do **not** replace your authored alignment/pivots.
+
+### Completion and remaining acceptance checks
+
+| Area | Verified offline | Remaining |
+| --- | --- | --- |
+| GLB import, roles, pivots and project migration | Native tests and actual wizard events | Author-specific calibration |
+| Real reference skeleton, rigid bindings and native gen8/gen9 YDR/YTD | Native round trip plus independent binary/XML checks | GTA/FiveM animation and visual acceptance |
+| Base weapon + magazine/scope/grip resource metadata | Production CLI end-to-end export tests | Real component/reload behavior |
+| Autonomous operation | CLI inspection/configuration/validation/export and failure tests | A running FiveM client/server test environment |
+| Specialized components and rendering | Explicit rejection, no invented helper bones | Suppressor/flashlight helper-rig workflow, transparent/PBR variants |
+
+Only high LOD is generated; automatic LODs/collision and arbitrary shader
+profiles are not part of this supported conversion profile. Existing malformed
+templates (for example MINISMG animation XML) fail explicitly instead of being
+silently accepted.
 
 ## License
 
@@ -186,6 +323,7 @@ MIT-licensed cgltf 1.15; it adds no external runtime dependency.
 ## Building
 
 Requires Visual Studio 2026 (toolset v145, C++ desktop workload) and wxWidgets (e.g. `vcpkg install wxwidgets:x64-windows` followed by `vcpkg integrate install`). The post-build step copies `templates`, `export`, `icon.ico`, licenses and user documentation next to the exe, so the output folder (e.g. `x64\Release`) is runnable as is.
+Release x64 also builds the console converter project automatically.
 
 ### Resource writer tests
 
@@ -199,6 +337,10 @@ New-Item -ItemType Directory -Force .\tests\x64\Release\generated | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Native tests failed" }
 python .\tests\verify_resources.py "$PWD" "$PWD\tests\x64\Release\generated"
 if ($LASTEXITCODE -ne 0) { throw "Independent verification failed" }
+MSBuild .\vWeaponsToolkit.vcxproj /p:Configuration=Release /p:Platform=x64 /v:minimal
+if ($LASTEXITCODE -ne 0) { throw "Release/CLI build failed" }
+python .\tests\verify_converter_cli.py "$PWD" "$PWD\tests\x64\Release\generated"
+if ($LASTEXITCODE -ne 0) { throw "CLI pipeline failed" }
 ```
 
 Python 3 is needed only for independent verification, not by the application.
@@ -223,6 +365,10 @@ When `test\m4a1.glb` is present, it is tested read-only, including hierarchy
 role suggestions and project round trips; this optional user fixture is not
 required on a clean checkout. Own-dialog screenshots are written to the
 generated test directory. The generated `static_import.glb` can also be opened in the GUI.
+Preview tests measure the real M4A1 at640x400 and interactive360x225 (50ms
+interactive render budget), verify color accuracy and a real modal-loop burst
+of40 mouse events becoming one interactive frame plus one full-quality settled
+frame. Timings are machine-dependent; these are not GPU/PBR benchmarks.
 Generated fixtures and test binaries stay under the ignored `tests\x64` directory.
 
 ## Planned #TODO

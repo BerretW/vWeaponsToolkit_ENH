@@ -3,6 +3,7 @@
 #include <wx/filename.h>
 #include "cGlbImportDialog.h"
 #include "cGlbPlacement.h"
+#include "cGlbRig.h"
 #include "cRscWriter.h"
 #include <functional>
 #include <iostream>
@@ -73,13 +74,25 @@ namespace
 	{
 		wxArrayString templates;
 		templates.Add("WEAPON_CARBINERIFLE");
-		cGlbImportDialog dialog(nullptr, model, project, templates);
+		auto rig=project;
+		ReferenceSkeleton skeleton;
+		skeleton.bones={{"Gun_Root",0,-1,{}, {0,0,0,1}}, {"Gun_Main_Bone",3360,0,{}, {0,0,0,1}}};
+		setGlbReferenceSkeleton(model,rig,skeleton);
+		cGlbImportDialog dialog(nullptr, model, rig, templates);
+		auto* guide=dynamic_cast<wxStaticText*>(wxWindow::FindWindowByName("glb-step-instructions",&dialog));
+		auto* progress=dynamic_cast<wxStaticText*>(wxWindow::FindWindowByName("glb-progress",&dialog));
+		require(guide && guide->GetLabel().Contains("assembled weapon") && progress && progress->GetLabel().Contains("[Inspect]"),
+			"Inspection must explain the goal and show the current workflow step.");
 		require(dialog.GetEscapeId() == wxID_CLOSE, "Escape must use the guarded Close action.");
 		std::exception_ptr failure;
 		wxTheApp->CallAfter([&] {
 			try
 			{
 				button(&dialog, wxID_FORWARD);
+				auto* statusGuide=dynamic_cast<wxStaticText*>(wxWindow::FindWindowByName("glb-readiness",&dialog));
+				require(guide->GetLabel().Contains("role") && statusGuide && statusGuide->GetLabel().Contains("Still to assign: 2"),
+					"Assignment needs visible instructions and a live incomplete-object count.");
+				namedButton(&dialog,"glb-next-incomplete");
 				auto* list = dynamic_cast<wxListCtrl*>(wxWindow::FindWindowByName("glb-parts", &dialog));
 				auto* role = dynamic_cast<wxChoice*>(wxWindow::FindWindowByName("glb-part-role", &dialog));
 				require(list && role && list->GetItemCount() == 3, "Wizard object list.");
@@ -96,6 +109,7 @@ namespace
 				}
 				require(list->GetItemText(1, 3) == "Body / fixed detail" &&
 					list->GetItemText(2, 3) == "Exclude from weapon", "Wizard role selection.");
+				require(statusGuide->GetLabel().Contains("Still to assign: 0"),"Readiness must track role changes.");
 				capture(dialog, wxFileName(output, "glb_assignment_ui.png").GetFullPath());
 				button(&dialog, wxID_FORWARD);
 				require(dialog.FindWindow(wxID_FORWARD)->IsEnabled(), "Alignment must be a real step before Review.");
@@ -141,7 +155,43 @@ namespace
 				namedButton(&dialog, "glb-confirm-alignment");
 				capture(dialog, wxFileName(output, "glb_alignment_ui.png").GetFullPath());
 				button(&dialog, wxID_FORWARD);
+				require(dialog.FindWindow(wxID_FORWARD)->IsEnabled(),"Reference binding is a separate step.");
+				auto* bones=dynamic_cast<wxChoice*>(wxWindow::FindWindowByName("glb-bone",&dialog));
+				bones->SetSelection(2);
+				wxCommandEvent binding(wxEVT_CHOICE,bones->GetId());
+				bones->GetEventHandler()->ProcessEvent(binding);
+				list->SetItemState(0,wxLIST_STATE_SELECTED,wxLIST_STATE_SELECTED);
+				bones->SetSelection(2); bones->GetEventHandler()->ProcessEvent(binding);
+				namedButton(&dialog,"glb-pick-bone-origin");
+				auto* rigStatus=dynamic_cast<wxStaticText*>(wxWindow::FindWindowByName("glb-rig-status",&dialog));
+				require(rigStatus && rigStatus->GetLabel().Contains("Armed"),"Reference bone picker must be explicitly armed.");
+				for (unsigned k=0;k<3;++k)
+				{
+					auto* field=dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName(
+						wxString("glb-origin-")+wxString("xyz"[k]),&dialog));
+					require(field->GetValue().ToDouble(&number),"Source anchor control value.");
+					mapped.alignment.origin[k]=float(number);
+				}
+				const auto rigView=makePreparedGlbPreview(model,mapped);
+				const auto rigSize=panel->GetClientSize();
+				picked=false;
+				for (int y=10;y<rigSize.y-20 && !picked;y+=8)
+					for (int x=10;x<rigSize.x-10 && !picked;x+=8)
+					{
+						pixel={x,y};
+						picked=pickPreviewSurface(rigView,rigSize.x,rigSize.y,.35f,.2f,1,pixel,expected);
+					}
+				require(picked,"Reference picker must find a visible rest surface.");
+				wxMouseEvent bonePick(wxEVT_RIGHT_UP); bonePick.SetPosition(pixel);
+				panel->GetEventHandler()->ProcessEvent(bonePick);
+				require(rigStatus->GetLabel().Contains("rest origin (output m)") && !rigStatus->GetLabel().Contains("Armed"),
+					"Reference bone picker must move a real bone and disarm after a successful pick.");
+				button(&dialog,wxID_FORWARD);
 				require(!dialog.FindWindow(wxID_FORWARD)->IsEnabled() && !list->IsEnabled(), "Review must not offer fake export.");
+				auto* exportAction=wxWindow::FindWindowByName("glb-export-resources",&dialog);
+				require(exportAction && exportAction->IsShown() && exportAction->IsEnabled(),"Completed preparation must offer real resource export.");
+				require(guide->GetLabel().Contains("server.cfg") && progress->GetLabel().Contains("[Export]"),
+					"Export must explain installation and distinguish its output from a saved project.");
 				auto* report = dynamic_cast<wxTextCtrl*>(wxWindow::FindWindowByName("glb-report", &dialog));
 				require(report && report->GetValue().Contains("Included size (metres)") &&
 					report->GetValue().Contains("Exclude from weapon: 1"), "Wizard review summary.");
@@ -169,6 +219,19 @@ namespace
 				button(&dialog, wxID_FORWARD);
 				capture(dialog, wxFileName(output, "m4a1_alignment_ui.png").GetFullPath());
 				namedButton(&dialog, "glb-confirm-alignment");
+				button(&dialog, wxID_FORWARD);
+				auto* list=dynamic_cast<wxListCtrl*>(wxWindow::FindWindowByName("glb-parts",&dialog));
+				for (size_t i=0;i<project.roles.size();++i)
+					if (project.roles[i]==GlbPartRole::Trigger)
+					{
+						list->SetItemState(long(i+1),wxLIST_STATE_SELECTED,wxLIST_STATE_SELECTED);
+						auto* slider=dynamic_cast<wxSlider*>(wxWindow::FindWindowByName("glb-bone-motion",&dialog));
+						slider->SetValue(10);
+						wxCommandEvent event(wxEVT_SLIDER,slider->GetId()); slider->GetEventHandler()->ProcessEvent(event);
+						capture(dialog,wxFileName(output,"m4a1_reference_rig_ui.png").GetFullPath());
+						slider->SetValue(0); slider->GetEventHandler()->ProcessEvent(event);
+						break;
+					}
 				button(&dialog, wxID_FORWARD);
 				require(!dialog.FindWindow(wxID_FORWARD)->IsEnabled(), "Real GLB review state.");
 				capture(dialog, wxFileName(output, "m4a1_review_ui.png").GetFullPath());
@@ -245,7 +308,7 @@ void testGlbImportProjects(const wxString& repo, const wxString& output)
 		auto xml = completeXml; replace(xml, from, to); write(broken, xml);
 		fails([&] { loadGlbImportProject(broken, reopened); }, reason);
 	};
-	corrupt("version=\"2\"", "version=\"99\"", "version");
+	corrupt("version=\"3\"", "version=\"99\"", "version");
 	corrupt("role=\"body\"", "role=\"unknown\"", "Unknown saved");
 	corrupt("index=\"1\"", "index=\"0\"", "identity/order");
 	corrupt("node=\"1\"", "node=\"99\"", "identity/order");
@@ -294,6 +357,10 @@ void testGlbImportProjects(const wxString& repo, const wxString& output)
 	const auto roundTrip = loadGlbImportProject(realPath, reopened);
 	require(roundTrip.roles == realProject.roles && reopened.sourceSha256 == real.sourceSha256, "M4A1 project/source round trip.");
 	auto confirmed = realProject;
+	setGlbReferenceSkeleton(real,confirmed,loadReferenceSkeleton(repo+"\\test\\gen8\\w_ar_carbinerifle_m31.ydr"));
+	const auto suggestedBones=suggestGlbBones(real,confirmed);
+	for (size_t i=0;i<real.parts.size();++i)
+		assignGlbBone(real,confirmed,i,suggestedBones[i]>=0 ? suggestedBones[i] : 2);
 	confirmed.alignment.confirmed = true;
 	for (size_t i = 0; i < real.parts.size(); ++i)
 	{

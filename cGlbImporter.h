@@ -1,6 +1,7 @@
 #pragma once
 #include "cModelPreview.h"
 #include "cYdrWriter.h"
+#include "cGlbMaterials.h"
 #include <wx/string.h>
 
 struct GlbMaterial
@@ -38,3 +39,6 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes);
 GlbModel loadGlb(const wxString& path);
 PreviewModel makeGlbPreview(const GlbModel& source, int selectedPart = -1);
 PreviewModel makeGlbPreview(const GlbModel& source, const std::vector<size_t>& selectedParts);
+// Re-reads original metadata: inspection's reduced material fields are not export validation.
+std::vector<GlbConvertedMaterial> convertGlbSourceMaterials(const wxString& path,
+	const std::string& expectedSha256, const std::string& modelName, unsigned maxTextureSize = 1024);

@@ -1,5 +1,6 @@
 #pragma once
 #include "cAssetFormat.h"
+#include "cSkeleton.h"
 #include <array>
 #include <vector>
 
@@ -12,7 +13,9 @@ struct YdrVertex
 	std::array<float, 4> tangent = { 1, 0, 0, 1 };
 };
 
-// Currently the normal_spec_decal shader only. Texture names are external YTD references.
+enum class YdrShaderProfile { NormalSpecDecal, WeaponNormalSpecDetailPalette };
+
+// Texture names are external YTD references.
 struct YdrMaterial
 {
 	std::string diffuseTexture;
@@ -23,6 +26,9 @@ struct YdrMaterial
 	float specularIntensity = 0.1f;
 	float specularFalloff = 20;
 	float specularFresnel = 0.99f;
+	YdrShaderProfile profile = YdrShaderProfile::NormalSpecDecal;
+	std::string detailTexture;
+	std::string paletteTexture;
 };
 
 struct YdrMesh
@@ -30,6 +36,8 @@ struct YdrMesh
 	std::vector<YdrVertex> vertices;
 	std::vector<uint32_t> indices;
 	uint16_t material = 0;
+	int rigidBone = -1;
+	size_t sourcePart = size_t(-1);
 };
 
 struct YdrDrawable
@@ -38,8 +46,10 @@ struct YdrDrawable
 	std::vector<YdrMaterial> materials;
 	std::vector<YdrMesh> meshes;
 	float lodDistance = 9998;
+	ReferenceSkeleton skeleton;
 };
 
-// Static, high-LOD-only drawable. No skeleton, collision or automatic LOD generation.
+// High-LOD-only drawable; optional binary-reference skeleton and rigid per-mesh skinning.
+// No collision or automatic LOD generation.
 // Rejects invalid data instead of dropping triangles or truncating 32-bit indices.
 std::vector<uint8_t> buildYdr(const YdrDrawable& drawable, GameGeneration generation);

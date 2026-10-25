@@ -6,6 +6,7 @@ import sys
 import unittest
 import zlib
 import xml.etree.ElementTree as ET
+from verify_fivem_log import verify as verify_runtime_log
 from pathlib import Path
 
 
@@ -217,17 +218,18 @@ def read_shader(resource, shader):
     result["name"], result["preset"] = r.unpack("II", shader)
     p, refs, unknowns, infos = r.unpack("4Q", shader + 8)
     nb, nt, nu, ns, count, zero1, zero2, copies = r.unpack("8B", infos)
-    assert (nb, nt, nu, ns, count, zero1, zero2, copies) == (2, 4, 0, 5, 19, 0, 0, 12)
+    weapon = result["name"] == joaat("weapon_normal_spec_detail_palette")
+    assert (nb, nt, nu, ns, count, zero1, zero2, copies) == ((2, 6, 0, 7, 24, 0, 0, 12) if weapon else (2, 4, 0, 5, 19, 0, 0, 12))
     assert unknowns == 0
     pointers = r.unpack("24Q", p)
     assert pointers[0] == p + nb*copies*8
     sizes = [pointers[1]-pointers[0], pointers[2]-pointers[1]]
-    assert sizes == [32, 48]
+    assert sizes == ([48, 16] if weapon else [32, 48])
     assert refs == p + nb*copies*8 + sum(sizes)*copies
     result["bucket"], size, result["mask"] = r.unpack("BHI", shader + 57)
     assert size == nb*copies*8 + sum(sizes)*copies + nt*copies*8 + ns
     r.read(p, size)
-    assert r.read(refs + nt*copies*8, ns) == bytes(range(5))
+    assert r.read(refs + nt*copies*8, ns) == (bytes([5, 0, 1, 2, 6, 3, 4]) if weapon else bytes(range(5)))
     for copy in range(copies):
         for buffer in range(nb):
             pointer = pointers[copy*nb+buffer]
@@ -272,7 +274,7 @@ def read_drawable(resource):
     assert r.unpack("Q", root + 144) == 0  # no joints
     assert r.unpack("Q", root + 200) == 0  # no collision
     assert r.unpack("4f", root + 112) == (9998,)*4
-    assert r.unpack("4I", root + 128) == (0xFF01, 0, 0, 0)
+    assert r.unpack("4I", root + 128) == (0xFF04, 0, 0, 0)
     group = r.unpack("Q", root + 16)
     assert r.unpack("Q", group + 8) == 0  # external YTD
     shader_array, shader_count, shader_capacity = r.unpack("QHH", group + 16)
@@ -317,7 +319,7 @@ def read_drawable(resource):
             data, index_data = r.unpack("Q", vb+24), r.unpack("Q", ib+24)
             decl = r.unpack("Q", vb+56)
             offsets, sizes, types = r.unpack("52I", decl), r.unpack("52B", decl+208), r.unpack("52B", decl+260)
-            expected = {0: (0, 12, 6), 4: (12, 12, 6), 8: (36, 16, 2), 24: (24, 4, 28), 28: (28, 8, 16)}
+            expected = {0: (0, 52, 6), 4: (12, 52, 6), 8: (36, 52, 2), 24: (24, 52, 28), 28: (28, 52, 16)}
             for slot in range(52):
                 assert (offsets[slot], sizes[slot], types[slot]) == expected.get(slot, (0, 0, 0))
             assert r.unpack("Q", decl+312) == vertices << 10 | 52 << 2
@@ -341,6 +343,28 @@ def read_drawable(resource):
 
 
 class WriterTests(unittest.TestCase):
+    def test_runtime_log_checker(self):
+        import json
+        record = {"resource": "example", "weapon_valid": True, "asset_loaded": True,
+                  "component_count": 1, "components": [{"id": "COMPONENT_EXAMPLE", "compatible": True,
+                                                      "model_matches": True, "model_loaded": True}]}
+        line = lambda value: "[vwt-validation] " + json.dumps(value)
+        self.assertEqual(verify_runtime_log(line(record), "example"), record)
+        with self.assertRaises(ValueError):
+            verify_runtime_log("", "example")
+        for key in ("weapon_valid", "asset_loaded"):
+            invalid = dict(record, **{key: False})
+            with self.assertRaises(ValueError):
+                verify_runtime_log(line(invalid), "example")
+        invalid = dict(record, component_count=2)
+        with self.assertRaises(ValueError):
+            verify_runtime_log(line(invalid), "example")
+        invalid = dict(record, components=[dict(record["components"][0], model_loaded=False)])
+        with self.assertRaises(ValueError):
+            verify_runtime_log(line(invalid), "example")
+        with self.assertRaises(ValueError):
+            verify_runtime_log("[vwt-validation] []", "example")
+
     def test_containers(self):
         for name in ("system_only.rsc", "page_growth.rsc", "large_page.rsc"):
             with self.subTest(name=name):
@@ -404,7 +428,7 @@ class WriterTests(unittest.TestCase):
             with self.subTest(project=filename):
                 root = ET.parse(path).getroot()
                 self.assertEqual(root.tag, "glb-import")
-                self.assertEqual(root.attrib["version"], "2")
+                self.assertEqual(root.attrib["version"], "3")
                 self.assertEqual(root.attrib["template"], "WEAPON_CARBINERIFLE")
                 source = (path.parent / root.attrib["source"]).resolve()
                 if not source.exists() and filename.startswith("m4a1"):
@@ -434,7 +458,7 @@ class WriterTests(unittest.TestCase):
         path = OUTPUT / "placement.vwtimport.xml"
         root = ET.parse(path).getroot()
         a = root.find("alignment").attrib
-        self.assertEqual(root.attrib["version"], "2")
+        self.assertEqual(root.attrib["version"], "3")
         self.assertEqual(float(a["scale"]), 2)
         self.assertEqual([float(a[f"rotation-{c}"]) for c in "xyz"], [0, 0, 90])
         origin = [float(a[f"origin-{c}"]) for c in "xyz"]
@@ -451,9 +475,26 @@ class WriterTests(unittest.TestCase):
         for actual, expected in zip([p[i]+offset[i] for i in range(3)], [1, -2, 3]):
             self.assertAlmostEqual(actual, expected)
         legacy = ET.parse(OUTPUT / "legacy.vwtimport.xml").getroot()
-        self.assertEqual(legacy.attrib["version"], "2")
+        self.assertEqual(legacy.attrib["version"], "3")
         self.assertEqual(legacy.find("alignment").attrib["confirmed"], "0")
         self.assertEqual([p.attrib["role"] for p in legacy.findall("part")], ["body", "excluded"])
+
+    def test_reference_snapshot(self):
+        root = ET.parse(OUTPUT / "reference_rig.vwtimport.xml").getroot()
+        reference = root.find("skeleton")
+        self.assertEqual(root.attrib["version"], "3")
+        self.assertEqual(reference.attrib["binary-metadata"], "1")
+        expected = ET.parse(REPO / "test" / "gen8" / "w_ar_carbinerifle_m31.ydr.xml").findall("./Skeleton/Bones/Item")
+        bones = reference.findall("bone")
+        self.assertEqual(len(bones), len(expected))
+        for bone, source in zip(bones, expected):
+            self.assertEqual(bone.attrib["name"], source.findtext("Name"))
+            self.assertEqual(bone.attrib["tag"], source.find("Tag").attrib["value"])
+            self.assertEqual(bone.attrib["parent"], source.find("ParentIndex").attrib["value"])
+        links = reference.findall("link")
+        self.assertEqual(len(links), 20)
+        for link in links:
+            self.assertEqual(int(bones[int(link.attrib["child"])].attrib["parent"]), int(link.attrib["parent"]))
 
     def test_written_drawables(self):
         # The supplied shader provides an independent reference for the gen9 binding table.
@@ -523,6 +564,106 @@ class WriterTests(unittest.TestCase):
                                 self.assertEqual(vertex[6:10], (25, 80, 150, 200))
                                 self.assertEqual(vertex[10:12], (coords[v][0]-.25, coords[v][1]*2))
                                 self.assertEqual(vertex[12:], (-1., 0., 0., -1.))
+
+    def test_rigged_drawables(self):
+        xml = ET.parse(REPO / "test" / "gen8" / "w_ar_carbinerifle_m31.ydr.xml")
+        expected = xml.findall("./Skeleton/Bones/Item")
+        self.assertEqual(len(expected), 17)
+        for generation in ("gen8", "gen9"):
+            with self.subTest(generation=generation):
+                r = Resource(OUTPUT / f"{generation}_rigged.ydr")
+                skeleton = r.unpack("Q", 0x50000018)
+                count = r.unpack("H", skeleton+0x5E)
+                self.assertEqual(count, len(expected))
+                bones = r.unpack("Q", skeleton+0x20)
+                local = r.unpack("Q", skeleton+0x30)
+                parents = r.unpack("Q", skeleton+0x38)
+                inverse_bind = r.unpack("Q", skeleton+0x28)
+                world = []
+                for i, e in enumerate(expected):
+                    b = bones+i*80
+                    self.assertEqual(r.name(r.unpack("Q", b+56)), e.findtext("Name"))
+                    self.assertEqual(r.unpack("H", b+68), int(e.find("Tag").attrib["value"]))
+                    self.assertEqual(r.unpack("h", b+50), int(e.find("ParentIndex").attrib["value"]))
+                    self.assertEqual(r.unpack("h", parents+i*2), int(e.find("ParentIndex").attrib["value"]))
+                    self.assertEqual(r.unpack("HH", b+66), (i, int(e.find("Tag").attrib["value"])))
+                    self.assertEqual(r.unpack("H", b+70), i)
+                    for actual, key in zip(r.unpack("4f", b), "xyzw"):
+                        self.assertAlmostEqual(actual, float(e.find("Rotation").attrib[key]), places=6)
+                    for actual, key in zip(r.unpack("3f", b+16), "xyz"):
+                        self.assertAlmostEqual(actual, float(e.find("Translation").attrib[key]), places=6)
+                    for k, key in enumerate("xyzw"):
+                        self.assertAlmostEqual(r.unpack("f", local+i*64+k*16+12),
+                                               float(e.find("TransformUnk").attrib[key]), places=5)
+                    # Independent row-major quaternion/TRS evaluation, not native helpers.
+                    x,y,z,w = [float(e.find("Rotation").attrib[k]) for k in "xyzw"]
+                    length = math.sqrt(x*x+y*y+z*z+w*w)
+                    x,y,z,w = [v/length for v in (x,y,z,w)]
+                    t = [float(e.find("Translation").attrib[k]) for k in "xyz"]
+                    local_matrix = [[1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y), t[0]],
+                                    [2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x), t[1]],
+                                    [2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y), t[2]],
+                                    [0,0,0,1]]
+                    parent = int(e.find("ParentIndex").attrib["value"])
+                    m = local_matrix if parent < 0 else [[sum(world[parent][row][k]*local_matrix[k][col] for k in range(4))
+                                                           for col in range(4)] for row in range(4)]
+                    world.append(m)
+                    inv = r.unpack("16f", inverse_bind+i*64)
+                    for row in range(3):
+                        for col in range(3):
+                            self.assertAlmostEqual(inv[col*4+row], m[col][row], places=5)
+                        self.assertAlmostEqual(inv[12+row], -sum(m[k][row]*m[k][3] for k in range(3)), places=5)
+                buckets, bucket_count = r.unpack("Q", skeleton+16), r.unpack("H", skeleton+24)
+                lookup = {}
+                for bucket in range(bucket_count):
+                    node = r.unpack("Q", buckets+bucket*8)
+                    visited = set()
+                    while node:
+                        self.assertNotIn(node, visited)
+                        visited.add(node)
+                        tag, index, nxt = r.unpack("IIQ", node)
+                        self.assertEqual(tag % bucket_count, bucket)
+                        self.assertNotIn(tag, lookup)
+                        lookup[tag] = index
+                        node = nxt
+                self.assertEqual(lookup, {int(e.find("Tag").attrib["value"]): i for i, e in enumerate(expected)})
+                group = r.unpack("Q", 0x50000010)
+                array = r.unpack("Q", group+16)
+                shader = r.unpack("Q", array)
+                written = read_shader(r, shader)
+                original = Resource(REPO / "test" / generation / "w_ar_carbinerifle_m31.ydr")
+                original_group = original.unpack("Q", 0x50000010)
+                original_shader = original.unpack("Q", original.unpack("Q", original_group+16)+8)
+                profile = read_shader(original, original_shader)
+                self.assertEqual(written["name"], profile["name"])
+                self.assertEqual(written["bucket"], 0)
+                if generation == "gen9":
+                    self.assertEqual(written["metadata"], profile["metadata"])
+                high = r.unpack("Q", 0x50000050)
+                model = r.unpack("Q", r.unpack("Q", high))
+                self.assertEqual(r.unpack("BB", model+40), (17, 1))
+                geometries = r.unpack("Q", model+8)
+                for mesh_index, expected_bone in enumerate((2, 14)):
+                    geometry = r.unpack("Q", geometries+mesh_index*8)
+                    self.assertEqual(r.unpack("H", geometry+0x72), 17)
+                    palette = r.unpack("Q", geometry+0x68)
+                    self.assertEqual(r.unpack("17H", palette), tuple(range(17)))
+                    vb = r.unpack("Q", geometry+0x18)
+                    vertices = r.unpack("I", vb+(24 if generation=="gen8" else 8))
+                    data = r.unpack("Q", vb+(16 if generation=="gen8" else 24))
+                    stride = r.unpack("H", vb+(8 if generation=="gen8" else 12))
+                    self.assertEqual(stride, 60)
+                    for v in range(vertices):
+                        at = data+v*stride
+                        weights = r.unpack("4B", at+(12 if generation=="gen8" else 40))
+                        indices = r.unpack("4B", at+(16 if generation=="gen8" else 44))
+                        self.assertEqual(weights, (255, 0, 0, 0))
+                        self.assertEqual(indices, (expected_bone, 0, 0, 0))
+                    if generation == "gen9":
+                        decl = r.unpack("Q", vb+56)
+                        for slot, offset, kind in [(0,0,6), (4,12,6), (8,24,2), (16,40,28), (20,44,30), (24,48,28), (28,52,16)]:
+                            self.assertEqual((r.unpack("I", decl+slot*4), r.unpack("B", decl+208+slot), r.unpack("B", decl+260+slot)),
+                                             (offset, 60, kind))
 
 
 if __name__ == "__main__":

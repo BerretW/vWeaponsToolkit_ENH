@@ -160,6 +160,12 @@
     <ClInclude Include="cGlbImporter.h" />
     <ClInclude Include="cGlbImportProject.h" />
     <ClInclude Include="cGlbPlacement.h" />
+    <ClInclude Include="cSkeleton.h" />
+    <ClInclude Include="cGlbRig.h" />
+    <ClInclude Include="cGlbMaterials.h" />
+    <ClInclude Include="cGlbAssetBuilder.h" />
+    <ClInclude Include="cGlbResourceExporter.h" />
+    <ClInclude Include="cWeaponResource.h" />
     <ClInclude Include="cGlbImportDialog.h" />
     <ClInclude Include="third_party\cgltf.h" />
     <ClInclude Include="cWeaponComponent.h" />
@@ -177,6 +183,12 @@
     <ClCompile Include="cGlbImporter.cpp" />
     <ClCompile Include="cGlbImportProject.cpp" />
     <ClCompile Include="cGlbPlacement.cpp" />
+    <ClCompile Include="cSkeleton.cpp" />
+    <ClCompile Include="cGlbRig.cpp" />
+    <ClCompile Include="cGlbMaterials.cpp" />
+    <ClCompile Include="cGlbAssetBuilder.cpp" />
+    <ClCompile Include="cGlbResourceExporter.cpp" />
+    <ClCompile Include="cWeaponResource.cpp" />
     <ClCompile Include="cGlbImportDialog.cpp" />
     <ClCompile Include="cWeaponComponent.cpp" />
     <ClCompile Include="cWeaponsToolkit.cpp" />
@@ -186,6 +198,7 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyRuntimeFiles" AfterTargets="Build">
+    <MSBuild Projects="$(ProjectDir)converter\vwt-convert.vcxproj" Targets="Build" Properties="Configuration=Release;Platform=x64" Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
     <Exec Command="xcopy &quot;$(ProjectDir)templates&quot; &quot;$(OutDir)templates\&quot; /E /I /Y /Q" />
     <Exec Command="xcopy &quot;$(ProjectDir)export&quot; &quot;$(OutDir)export\&quot; /E /I /Y /Q" Condition="Exists('$(ProjectDir)export')" />
     <MakeDir Directories="$(OutDir)export" />

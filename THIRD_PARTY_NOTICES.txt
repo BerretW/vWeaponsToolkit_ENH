@@ -11,6 +11,13 @@ https://github.com/dexyfex/CodeWalker
   CodeWalker.Core/GameFiles/Resources/Texture.cs
   CodeWalker.Core/GameFiles/Resources/Drawable.cs
 
+The reference skeleton reader/writer, skin declarations, inverse-bind
+matrices and opaque weapon shader bindings were independently inspected
+in the supplied local gen8/gen9 YDR/XML fixtures. Runtime scalar metadata
+and child tables are retained from the user's reference, not copied from
+a third-party implementation. Texture/material conversion and the
+command-line/resource integration are original local implementations.
+
 CodeWalker is NOT generally licensed under GPL-3.0. Its Readme_Src.txt states:
 "This source code is released for educational purposes only."
 No CodeWalker implementation is copied into the new writer. Binary field

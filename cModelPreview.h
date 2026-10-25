@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <functional>
+#include <wx/timer.h>
 
 struct PreviewTexture
 {
@@ -41,8 +42,17 @@ struct PreviewModel
 	std::vector<PreviewMarker> markers;
 };
 
+struct PreviewRenderStats
+{
+	uint64_t frames = 0;
+	int width = 0;
+	int height = 0;
+};
+
 bool pickPreviewSurface(const PreviewModel& model, int width, int height, float yaw, float pitch,
 	float zoom, const wxPoint& pixel, std::array<float, 3>& point);
+wxImage renderPreviewImage(const PreviewModel& model, int width, int height,
+	float yaw, float pitch, float zoom);
 // Loads a legacy (gen8) or Enhanced (gen9) .ydr together with textures from the given .ytd files.
 bool loadPreviewModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths, PreviewModel& out, std::string& error);
 
@@ -55,6 +65,7 @@ public:
 	void showModel(PreviewModel loaded, bool preserveView = false);
 	void setPointPickedHandler(std::function<void(const std::array<float, 3>&)> handler);
 	void clearModel(const wxString& message);
+	PreviewRenderStats getRenderStats() const { return renderStats; }
 
 private:
 	void onPaint(wxPaintEvent& evt);
@@ -73,4 +84,10 @@ private:
 	float baseYaw = 0.0f;
 	wxPoint lastMouse;
 	std::function<void(const std::array<float, 3>&)> pointPicked;
+	wxTimer frameTimer;
+	wxTimer settleTimer;
+	bool framePending = false;
+	bool interactive = false;
+	PreviewRenderStats renderStats;
+	void requestFrame();
 };

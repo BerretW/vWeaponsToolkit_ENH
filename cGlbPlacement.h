@@ -12,6 +12,7 @@ struct GlbMotionPreview
 void validateGlbPlacement(const GlbImportProject& project);
 std::array<float, 3> glbAlignedPoint(const GlbAlignment& alignment, const std::array<float, 3>& point);
 std::array<float, 3> glbSourcePoint(const GlbAlignment& alignment, const std::array<float, 3>& point);
+std::array<float, 3> glbAlignedDirection(const GlbAlignment& alignment, const std::array<float, 3>& direction);
 std::vector<std::string> glbPlacementErrors(const GlbModel& model, const GlbImportProject& project);
 PreviewModel makePreparedGlbPreview(const GlbModel& model, const GlbImportProject& project,
 	int selectedPart = -1, const GlbMotionPreview& motion = {});

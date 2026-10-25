@@ -127,7 +127,7 @@ namespace
 		return result;
 	}
 
-	PreviewTexture image(const cgltf_image& source, size_t& decodedBytes)
+	PreviewTexture image(const cgltf_image& source, size_t& decodedBytes,unsigned previewLimit=4096)
 	{
 		if (source.uri || !source.buffer_view) fail("Images must be embedded PNG/JPEG buffer views.");
 		const auto* bytes = cgltf_buffer_view_data(source.buffer_view);
@@ -172,9 +172,17 @@ namespace
 		wxImage decoded;
 		if (!decoded.LoadFile(stream, type) || decoded.GetWidth() != int(width) || decoded.GetHeight() != int(height))
 			fail("Embedded image could not be decoded.");
+		if (std::max(width,height)>previewLimit)
+		{
+			const double ratio=double(previewLimit)/std::max(width,height);
+			width=std::max(1u,unsigned(std::lround(width*ratio)));
+			height=std::max(1u,unsigned(std::lround(height*ratio)));
+			decoded.Rescale(int(width),int(height),wxIMAGE_QUALITY_HIGH);
+		}
 		PreviewTexture result;
-		result.width = int(width); result.height = int(height); result.rgba.resize(size);
-		for (size_t i = 0; i < size/4; ++i)
+		const size_t previewSize=size_t(width)*height*4;
+		result.width = int(width); result.height = int(height); result.rgba.resize(previewSize);
+		for (size_t i = 0; i < previewSize/4; ++i)
 		{
 			std::copy_n(decoded.GetData()+i*3, 3, result.rgba.data()+i*4);
 			const auto* rgb = decoded.GetData()+i*3;
@@ -182,7 +190,7 @@ namespace
 				(decoded.HasMask() && rgb[0] == decoded.GetMaskRed() &&
 					rgb[1] == decoded.GetMaskGreen() && rgb[2] == decoded.GetMaskBlue() ? 0 : 255);
 		}
-		decodedBytes += size;
+		decodedBytes += previewSize;
 		return result;
 	}
 }
@@ -209,7 +217,7 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 	if (!data->scenes_count || data->nodes_count > 4096 || data->materials_count > 128 || data->images_count > 128)
 		fail("Requires a scene, at most 4096 nodes, 128 materials and 128 images.");
 	GlbModel out;
-	warning(out, "Static geometry only: no weapon rigging, GTA shader conversion or resource export.");
+	warning(out, "Source GLB is imported statically; reference binding and game material conversion are configured in later steps.");
 	warning(out, "Preview uses base color and vertex colors only; alpha, normal maps and PBR lighting are not rendered.");
 	if (data->animations_count) warning(out, "Animations are not played; showing the authored static node transforms.");
 	const auto* scene = data->scene ? data->scene : &data->scenes[0];
@@ -239,7 +247,7 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 			if (images[index] < 0)
 			{
 				images[index] = static_cast<int>(out.textures.size());
-				out.textures.push_back(image(*view.texture->image, decodedBytes));
+				out.textures.push_back(image(*view.texture->image, decodedBytes,512));
 			}
 			material.texture = images[index];
 		}
@@ -377,7 +385,7 @@ GlbModel importGlb(const std::vector<uint8_t>& bytes)
 				for (size_t i = 0; i < count; ++i) mesh.indices[i] = static_cast<uint32_t>(i);
 				warning(out, "Missing normals: generated flat normals (vertices split at triangle edges).");
 			}
-			if (!part.hasTangents) warning(out, "Some parts have no usable tangents; tangent generation is required before normal-mapped export.");
+			if (!part.hasTangents) warning(out, "Some source parts have no usable tangents; export generates them and explicitly diagnoses collapsed UVs.");
 			out.parts.push_back(std::move(part));
 		}
 	}
@@ -436,4 +444,108 @@ PreviewModel makeGlbPreview(const GlbModel& source, const std::vector<size_t>& s
 	if (out.meshes.empty()) fail("No preview geometry.");
 	out.info = "GLB (static), " + std::to_string(out.meshes.size()) + " parts, " + std::to_string(triangles) + " tris";
 	return out;
+}
+
+namespace
+{
+	YtdImage resizeExportImage(YtdImage source,unsigned maximum)
+	{
+		const unsigned width=std::max(4u,std::min(source.width,maximum));
+		const unsigned height=std::max(4u,std::min(source.height,maximum));
+		if (width==source.width && height==source.height) return source;
+		YtdImage out;
+		out.name=source.name; out.width=width; out.height=height; out.semantic=source.semantic;
+		out.rgba.resize(size_t(width)*height*4);
+		auto linear=[](double x) { x/=255; return x<=.04045 ? x/12.92:std::pow((x+.055)/1.055,2.4); };
+		auto byte=[](double x) { return uint8_t(std::lround(std::max(0.0,std::min(255.0,x)))); };
+		for (unsigned y=0;y<height;++y)
+			for (unsigned x=0;x<width;++x)
+			{
+				const unsigned x0=x*source.width/width, x1=std::max(x0+1,(x+1)*source.width/width);
+				const unsigned y0=y*source.height/height, y1=std::max(y0+1,(y+1)*source.height/height);
+				double sum[3]={},count=0;
+				for (unsigned sy=y0;sy<y1;++sy)
+					for (unsigned sx=x0;sx<x1;++sx)
+					{
+						const auto* p=&source.rgba[(size_t(sy)*source.width+sx)*4];
+						for (unsigned k=0;k<3;++k)
+							sum[k]+=source.semantic==YtdImageSemantic::ColorSrgb ? linear(p[k]) :
+								source.semantic==YtdImageSemantic::TangentNormal ? p[k]/127.5-1:p[k]/255.0;
+						++count;
+					}
+				for (double& v:sum) v/=count;
+				if (source.semantic==YtdImageSemantic::TangentNormal)
+				{
+					const double n=std::sqrt(sum[0]*sum[0]+sum[1]*sum[1]+sum[2]*sum[2]);
+					if (n<1e-12) fail("Normal-map resize produced an undefined normal.");
+					for (double& v:sum) v=(v/n+1)*.5;
+				}
+				for (unsigned k=0;k<3;++k)
+				{
+					double v=sum[k];
+					if (source.semantic==YtdImageSemantic::ColorSrgb) v=v<=.0031308 ? 12.92*v:1.055*std::pow(v,1/2.4)-.055;
+					out.rgba[(size_t(y)*width+x)*4+k]=byte(v*255);
+				}
+				out.rgba[(size_t(y)*width+x)*4+3]=255;
+			}
+		return out;
+	}
+}
+
+std::vector<GlbConvertedMaterial> convertGlbSourceMaterials(const wxString& path,
+	const std::string& expectedSha256,const std::string& modelName,unsigned maximum)
+{
+	if (maximum<4 || maximum>4096 || (maximum&(maximum-1))) fail("Texture size must be a power of two, 4..4096.");
+	normalizeAssetName(modelName,"Model");
+	wxFile file(path,wxFile::read);
+	const auto length=file.IsOpened() ? file.Length():-1;
+	if (length<20 || length>wxFileOffset(fileLimit)) fail("Could not read source GLB for material conversion.");
+	std::vector<uint8_t> bytes(static_cast<size_t>(length));
+	if (file.Read(bytes.data(),bytes.size())!=length || sha256(bytes)!=expectedSha256)
+		fail("Source GLB changed before material conversion.");
+	if (u32(bytes.data())!=0x46546C67 || u32(bytes.data()+4)!=2 || u32(bytes.data()+8)!=bytes.size())
+		fail("Material source must be a valid GLB 2.0 container.");
+	size_t allocated=0;
+	cgltf_options options={}; options.memory={allocate,release,&allocated};
+	cgltf_data* raw=nullptr;
+	check(cgltf_parse(&options,bytes.data(),bytes.size(),&raw),"Material source parse");
+	std::unique_ptr<cgltf_data,decltype(&cgltf_free)> data(raw,cgltf_free);
+	if (data->extensions_required_count || data->materials_count>128 || data->images_count>128)
+		fail("Unsupported required extension or material/image count.");
+	if (data->buffers_count!=1 || data->buffers[0].uri) fail("Material source must use one embedded buffer.");
+	check(cgltf_load_buffers(&options,data.get(),nullptr),"Material source buffers");
+	check(cgltf_validate(data.get()),"Material source validation");
+	std::vector<GlbConvertedMaterial> output;
+	size_t outputBytes=0;
+	for (size_t i=0;i<=data->materials_count;++i)
+	{
+		YtdImage base,normal,mr;
+		const cgltf_material* material=i<data->materials_count ? &data->materials[i]:nullptr;
+		auto decode=[&](const cgltf_texture_view& view,YtdImageSemantic semantic,YtdImage& out) -> const YtdImage* {
+			if (!view.texture) return nullptr;
+			if (!view.texture->image) fail("Material texture has no embedded PNG/JPEG.");
+			size_t decodedBytes=0;
+			auto decoded=image(*view.texture->image,decodedBytes);
+			out.name="source"; out.width=uint32_t(decoded.width); out.height=uint32_t(decoded.height);
+			out.rgba=std::move(decoded.rgba); out.semantic=semantic;
+			if ((out.width&(out.width-1)) || (out.height&(out.height-1))) fail("Export textures must have power-of-two dimensions.");
+			out=resizeExportImage(std::move(out),maximum);
+			return &out;
+		};
+		GlbMaterialInput input;
+		if (material)
+			input=glbMaterialInput(*material,
+				decode(material->pbr_metallic_roughness.base_color_texture,YtdImageSemantic::ColorSrgb,base),
+				decode(material->normal_texture,YtdImageSemantic::TangentNormal,normal),
+				decode(material->pbr_metallic_roughness.metallic_roughness_texture,YtdImageSemantic::LinearData,mr));
+		input.name=modelName+"_m"+std::to_string(i);
+		auto converted=convertGlbMaterial(input);
+		converted.diffuse=resizeExportImage(std::move(converted.diffuse),maximum);
+		converted.normal=resizeExportImage(std::move(converted.normal),maximum);
+		converted.specular=resizeExportImage(std::move(converted.specular),maximum);
+		outputBytes+=converted.diffuse.rgba.size()+converted.normal.rgba.size()+converted.specular.rgba.size();
+		if (outputBytes>128*1024*1024) fail("Converted material images exceed 128 MiB; lower texture size.");
+		output.push_back(std::move(converted));
+	}
+	return output;
 }

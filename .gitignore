@@ -33,6 +33,7 @@
 
 /.vs
 x64/
+tests/__pycache__/
 x86/
 
 SLOT

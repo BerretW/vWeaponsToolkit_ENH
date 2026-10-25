@@ -1,4 +1,5 @@
 #include "cModelPreview.h"
+#include "cSkeleton.h"
 #include <wx/dcbuffer.h>
 #include <wx/mstream.h>
 #include <wx/file.h>
@@ -29,12 +30,15 @@ namespace
 			return (0x200u << (f & 0xF)) * s;
 		}
 
-		bool load(const std::string& path, std::string& err)
+		bool load(const wxString& path, std::string& err)
 		{
-			std::ifstream in(path, std::ios::binary);
-			if (!in) { err = "cannot open " + path; return false; }
-			std::vector<uint8_t> raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-			if (raw.size() < 16 || std::memcmp(raw.data(), "RSC7", 4) != 0) { err = "not an RSC7 resource: " + path; return false; }
+			wxFile in(path, wxFile::read);
+			if (!in.IsOpened()) { err = "cannot open " + path.ToStdString(); return false; }
+			const auto length=in.Length();
+			if (length<16 || length>128*1024*1024) { err="RSC7 file size must be 16 bytes..128 MiB."; return false; }
+			std::vector<uint8_t> raw(static_cast<size_t>(length));
+			if (in.Read(raw.data(), raw.size()) != length) { err="Could not read complete RSC7 file."; return false; }
+			if (std::memcmp(raw.data(), "RSC7", 4) != 0) { err = "not an RSC7 resource: " + path.ToStdString(); return false; }
 			uint32_t sf, gf;
 			std::memcpy(&sf, &raw[8], 4);
 			std::memcpy(&gf, &raw[12], 4);
@@ -54,7 +58,7 @@ namespace
 				if (n == 0) break;
 				got += n;
 			}
-			if (got < ssize) { err = "failed to inflate " + path; return false; }
+			if (got < expected) { err = "failed to inflate " + path.ToStdString(); return false; }
 			d.resize(got);
 			return true;
 		}
@@ -638,6 +642,60 @@ bool loadPreviewModel(const std::string& ydrPath, const std::vector<std::string>
 	}
 }
 
+ReferenceSkeleton loadReferenceSkeleton(const wxString& path)
+{
+	Rsc r;
+	std::string error;
+	if (!r.load(path, error)) throw std::runtime_error("Reference YDR: " + error);
+	if (r.version != 165 && r.version != 159)
+		throw std::runtime_error("Reference YDR must be a gen8 or gen9 drawable.");
+	const auto skeleton=r.u64(0x50000018);
+	if (!skeleton) throw std::runtime_error("Reference YDR has no skeleton.");
+	const auto count=r.u16(skeleton+0x5E);
+	if (!count || count>256 || r.u16(skeleton+0x1A)!=count)
+		throw std::runtime_error("Reference YDR has inconsistent/unsupported bone counts.");
+	const auto bones=r.u64(skeleton+0x20);
+	r.off(bones, size_t(count)*80);
+	ReferenceSkeleton result;
+	result.binaryMetadata=true;
+	result.unknown1C=r.u32(skeleton+0x1C);
+	result.tagBucketCount=r.u16(skeleton+0x18);
+	result.unknown5C=r.u16(skeleton+0x5C);
+	for (unsigned k=0;k<3;++k) result.signatures[k]=r.u32(skeleton+0x50+k*4);
+	const auto pairsCount=r.u32(skeleton+0x60);
+	const auto pairs=r.u64(skeleton+0x40);
+	if (!pairsCount || pairsCount>8192 || pairsCount%2) throw std::runtime_error("Unsupported reference skeleton child table size.");
+	for (uint32_t i=0;i<pairsCount/2;++i) result.childPairs.push_back({r.u16(pairs+i*4),r.u16(pairs+i*4+2)});
+	const auto localTransforms=r.u64(skeleton+0x30);
+	for (unsigned i=0; i<count; ++i)
+	{
+		const auto at=bones+i*80;
+		if (r.u16(at+0x42)!=i || r.u16(at+0x46)!=i)
+			throw std::runtime_error("Reference YDR bone indices are inconsistent.");
+		SkeletonBone bone;
+		const auto name=r.u64(at+0x38);
+		bone.name=r.cstr(name);
+		if (bone.name.size()>127 || r.u8(name+bone.name.size())!=0)
+			throw std::runtime_error("Reference bone name is too long or unterminated.");
+		bone.parent=r.get<int16_t>(at+0x32);
+		bone.sibling=r.get<int16_t>(at+0x30);
+		bone.flags=r.u16(at+0x40);
+		bone.tag=r.u16(at+0x44);
+		for (unsigned k=0; k<4; ++k) bone.rotation[k]=r.get<float>(at+k*4);
+		for (unsigned k=0;k<4;++k) bone.transformExtra[k]=r.get<float>(localTransforms+i*64+k*16+12);
+		for (unsigned k=0; k<3; ++k)
+		{
+			bone.translation[k]=r.get<float>(at+16+k*4);
+			const float scale=r.get<float>(at+32+k*4);
+			if (!std::isfinite(scale) || std::fabs(scale-1)>0.00001f)
+				throw std::runtime_error("Reference skeleton bone scaling is not supported; expected unit scale.");
+		}
+		result.bones.push_back(std::move(bone));
+	}
+	validateReferenceSkeleton(result);
+	return result;
+}
+
 // ---------- software renderer ----------
 
 namespace
@@ -697,8 +755,10 @@ bool pickPreviewSurface(const PreviewModel& model, int width, int height, float 
 	return found;
 }
 
-static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float pitch, float zoom)
+wxImage renderPreviewImage(const PreviewModel& m, int W, int H, float yaw, float pitch, float zoom)
 {
+	if (W<1 || H<1 || W>4096 || H>4096 || !std::isfinite(yaw) || !std::isfinite(pitch) ||
+		!std::isfinite(zoom) || zoom<=0) throw std::invalid_argument("Invalid preview rendering dimensions/camera.");
 	wxImage img(W, H, false);
 	uint8_t* out = img.GetData();
 	for (int y = 0; y < H; y++)
@@ -715,6 +775,24 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 
 	std::vector<float> zbuf((size_t)W * H, 1e30f);
 	const float L[3] = { -0.35f, -0.6f, 0.72f };
+	static const auto linearColors=[] {
+		std::array<float,256> table;
+		for (size_t i=0;i<table.size();++i)
+		{
+			const float s=float(i)/255;
+			table[i]=s<=.04045f ? s/12.92f:std::pow((s+.055f)/1.055f,2.4f);
+		}
+		return table;
+	}();
+	static const auto srgbColors=[] {
+		std::array<float,65537> table;
+		for (size_t i=0;i<table.size();++i)
+		{
+			const float l=float(i)/65536;
+			table[i]=255*(l<=.0031308f ? 12.92f*l:1.055f*std::pow(l,1/2.4f)-.055f);
+		}
+		return table;
+	}();
 
 	for (const PreviewMesh& mesh : m.meshes)
 	{
@@ -786,9 +864,10 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 						for (int k = 0; k < 3; ++k)
 						{
 							const float factor = w0*mesh.colors[i0*3+k] + w1*mesh.colors[i1*3+k] + w2*mesh.colors[i2*3+k];
-							const float srgb = rgb[k]/255.0f;
-							const float linear = (srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f)) * factor;
-							rgb[k] = 255*(linear <= 0.0031308f ? 12.92f*linear : 1.055f*std::pow(linear, 1/2.4f)-0.055f);
+							const float linear = std::max(0.f,std::min(1.f,linearColors[size_t(rgb[k])]*factor));
+							const float index=linear*65536;
+							const size_t lo=size_t(index), hi=std::min(lo+1,size_t(65536));
+							rgb[k]=srgbColors[lo]+(srgbColors[hi]-srgbColors[lo])*(index-float(lo));
 						}
 					zb = z;
 					uint8_t* o = out + ((size_t)y * W + x) * 3;
@@ -802,7 +881,7 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 // ---------- panel ----------
 
 cModelPreviewPanel::cModelPreviewPanel(wxWindow* parent, const wxPoint& pos, const wxSize& size)
-	: wxPanel(parent, wxID_ANY, pos, size, wxBORDER_SUNKEN)
+	: wxPanel(parent, wxID_ANY, pos, size, wxBORDER_SUNKEN), frameTimer(this), settleTimer(this)
 {
 	SetBackgroundStyle(wxBG_STYLE_PAINT);
 	message = "No model loaded";
@@ -813,6 +892,10 @@ cModelPreviewPanel::cModelPreviewPanel(wxWindow* parent, const wxPoint& pos, con
 	Bind(wxEVT_MOUSEWHEEL, &cModelPreviewPanel::onMouse, this);
 	Bind(wxEVT_LEFT_DCLICK, &cModelPreviewPanel::onMouse, this);
 	Bind(wxEVT_RIGHT_UP, &cModelPreviewPanel::onPick, this);
+	Bind(wxEVT_TIMER,[this](wxTimerEvent&) { framePending=false; render(); },frameTimer.GetId());
+	Bind(wxEVT_TIMER,[this](wxTimerEvent&) {
+		frameTimer.Stop(); framePending=false; interactive=false; render();
+	},settleTimer.GetId());
 }
 
 void cModelPreviewPanel::showModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths)
@@ -829,6 +912,7 @@ void cModelPreviewPanel::showModel(const std::string& ydrPath, const std::vector
 
 void cModelPreviewPanel::showModel(PreviewModel loaded, bool preserveView)
 {
+	frameTimer.Stop(); settleTimer.Stop(); framePending=false; interactive=false;
 	const bool reset = !preserveView || !hasModel;
 	model = std::move(loaded);
 	hasModel = true;
@@ -852,11 +936,16 @@ void cModelPreviewPanel::onPick(wxMouseEvent& evt)
 	if (!pointPicked || !hasModel) return;
 	try
 	{
+		if (framePending || interactive)
+		{
+			frameTimer.Stop(); settleTimer.Stop(); framePending=false; interactive=false; render();
+		}
 		std::array<float, 3> point;
 		const auto size = GetClientSize();
 		if (!pickPreviewSurface(model, size.x, size.y, baseYaw+yaw, pitch, zoom, evt.GetPosition(), point))
 			throw std::runtime_error("No model surface under the cursor. Click a visible surface or enter coordinates.");
-		pointPicked(point);
+		const auto callback=pointPicked;
+		callback(point);
 	}
 	catch (const std::exception& error)
 	{
@@ -866,6 +955,7 @@ void cModelPreviewPanel::onPick(wxMouseEvent& evt)
 
 void cModelPreviewPanel::clearModel(const wxString& msg)
 {
+	frameTimer.Stop(); settleTimer.Stop(); framePending=false; interactive=false;
 	hasModel = false;
 	model = PreviewModel();
 	message = msg;
@@ -877,13 +967,25 @@ void cModelPreviewPanel::render()
 {
 	wxSize s = GetClientSize();
 	if (!hasModel || s.x < 8 || s.y < 8) { Refresh(); return; }
-	bitmap = wxBitmap(renderModel(model, s.x, s.y, baseYaw + yaw, pitch, zoom));
+	const double ratio=interactive ? std::min(1.0,360.0/std::max(s.x,s.y)) : 1.0;
+	const int width=std::max(8,int(s.x*ratio)),height=std::max(8,int(s.y*ratio));
+	auto image=renderPreviewImage(model,width,height,baseYaw+yaw,pitch,zoom);
+	++renderStats.frames; renderStats.width=width; renderStats.height=height;
+	if (width!=s.x || height!=s.y) image.Rescale(s.x,s.y,wxIMAGE_QUALITY_NEAREST);
+	bitmap = wxBitmap(image);
 	Refresh();
+}
+
+void cModelPreviewPanel::requestFrame()
+{
+	interactive=true;
+	if (!framePending) { framePending=true; frameTimer.StartOnce(16); }
+	settleTimer.StartOnce(120);
 }
 
 void cModelPreviewPanel::onSize(wxSizeEvent& evt)
 {
-	render();
+	requestFrame();
 	evt.Skip();
 }
 
@@ -896,7 +998,7 @@ void cModelPreviewPanel::onMouse(wxMouseEvent& evt)
 	{
 		zoom *= evt.GetWheelRotation() > 0 ? 1.1f : 1.0f / 1.1f;
 		zoom = std::max(0.2f, std::min(zoom, 8.0f));
-		render();
+		requestFrame();
 	}
 	else if (evt.Dragging() && evt.LeftIsDown())
 	{
@@ -904,7 +1006,7 @@ void cModelPreviewPanel::onMouse(wxMouseEvent& evt)
 		yaw += (p.x - lastMouse.x) * 0.01f;
 		pitch = std::max(-1.5f, std::min(1.5f, pitch + (p.y - lastMouse.y) * 0.01f));
 		lastMouse = p;
-		render();
+		requestFrame();
 	}
 }
 
