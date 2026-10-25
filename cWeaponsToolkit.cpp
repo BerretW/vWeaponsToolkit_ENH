@@ -212,6 +212,31 @@ void cWeaponsToolkit::onCreateWeaponNextButtonChanged(wxCommandEvent& evt)
 	}
 }
 
+void cWeaponsToolkit::updateModelPreview()
+{
+	if (!previewPanel)
+		return;
+
+	const std::string model = generatedWeapon->getWeaponModel();
+	std::string ydr, hiYdr, ytd, hiYtd;
+	for (cWeaponAsset* a : generatedWeapon->weaponAssets) {
+		if (a->assetName == model + ".ydr") ydr = a->assetAbsolutePath;
+		else if (a->assetName == model + "_hi.ydr") hiYdr = a->assetAbsolutePath;
+		else if (a->assetName == model + ".ytd") ytd = a->assetAbsolutePath;
+		else if (a->assetName == model + "+hi.ytd") hiYtd = a->assetAbsolutePath;
+	}
+
+	if (ydr.empty() && hiYdr.empty()) {
+		previewPanel->clearModel("No model loaded");
+		return;
+	}
+
+	std::vector<std::string> ytds;
+	if (!hiYtd.empty()) ytds.push_back(hiYtd);
+	if (!ytd.empty()) ytds.push_back(ytd);
+	previewPanel->showModel(hiYdr.empty() ? ydr : hiYdr, ytds);
+}
+
 void cWeaponsToolkit::validateWeaponAssets()
 {
 	for (int i = 0; i < filesFoundListCtrl->GetItemCount(); i++) {
@@ -265,6 +290,7 @@ void cWeaponsToolkit::validateWeaponAssets()
 			}
 		}
 	}
+	updateModelPreview();
 }
 
 std::string cWeaponsToolkit::removeWeaponFileExtension(std::string s)
@@ -645,23 +671,69 @@ void cWeaponsToolkit::onExportButtonPressed(wxCommandEvent& evt)
 		return;
 	}
 
-	char c_exportDir[500] = "";
-	char c_exportStreamDir[500] = "";
-	char c_exportMetasDir[500] = "";
-
 	if (exportDirectory == "") {
 		wxMessageBox("Failed to export weapon, no export directory found.", wxT("vWeaponToolkit"), wxICON_ERROR);
 		return;
 	}
 
-	strcat(c_exportDir, exportDirectory.c_str());
-	strcat(c_exportDir, "\\");
-
 	if (generatedWeapon->getWeaponName() == "") {
 		wxMessageBox("Failed to export weapon, no weapon ID found.", wxT("vWeaponToolkit"), wxICON_ERROR);
 		return;
 	}
-	strcat(c_exportDir, generatedWeapon->getWeaponName().c_str());
+
+	const std::string legacyName = generatedWeapon->getWeaponName();
+	const std::string enhancedName = legacyName + "_enhanced";
+	std::string gen9Directory;
+
+	if (exportEnhancedCheckbox->GetValue())
+	{
+		gen9Directory = std::string(enhancedDirectoryPicker->GetPath());
+		if (gen9Directory.empty() || !wxDirExists(gen9Directory)) {
+			wxMessageBox("Failed to export Enhanced resource, select the folder with converted (gen9) models.", wxT("vWeaponToolkit"), wxICON_ERROR);
+			return;
+		}
+
+		std::string missing;
+		for (cWeaponAsset* a : generatedWeapon->weaponAssets) {
+			if (!wxFileExists(gen9Directory + "\\" + a->assetName))
+				missing += "\n" + a->assetName;
+		}
+		if (!missing.empty()) {
+			wxMessageBox("Failed to export Enhanced resource, these files were not found in the gen9 folder:" + missing, wxT("vWeaponToolkit"), wxICON_ERROR);
+			return;
+		}
+
+		if (wxDirExists(exportDirectory + "\\" + enhancedName)) {
+			wxMessageBox("Failed to export Enhanced resource, folder already exists: " + exportDirectory + "\\" + enhancedName, wxT("vWeaponToolkit"), wxICON_ERROR);
+			return;
+		}
+	}
+
+	if (!exportResource(legacyName, ""))
+		return;
+
+	std::string message = "Successfully exported weapon to: " + exportDirectory + "\\" + legacyName;
+
+	if (!gen9Directory.empty())
+	{
+		if (!exportResource(enhancedName, gen9Directory))
+			return;
+		message += "\nEnhanced resource: " + exportDirectory + "\\" + enhancedName;
+	}
+
+	wxMessageBox(message, wxT("vWeaponToolkit"), wxICON_INFORMATION);
+}
+
+// Writes one FiveM resource. If gen9Directory is set, models are taken from there (Enhanced), otherwise from the imported files.
+bool cWeaponsToolkit::exportResource(const std::string& folderName, const std::string& gen9Directory)
+{
+	char c_exportDir[500] = "";
+	char c_exportStreamDir[500] = "";
+	char c_exportMetasDir[500] = "";
+
+	strcat(c_exportDir, exportDirectory.c_str());
+	strcat(c_exportDir, "\\");
+	strcat(c_exportDir, folderName.c_str());
 	strcat(c_exportStreamDir, c_exportDir);
 	strcat(c_exportMetasDir, c_exportDir);
 	strcat(c_exportStreamDir, "\\stream");
@@ -672,12 +744,9 @@ void cWeaponsToolkit::onExportButtonPressed(wxCommandEvent& evt)
 	int stream_result = _mkdir(c_exportStreamDir);
 	int metas_result = _mkdir(c_exportMetasDir);
 
-	if (weapon_result == 0) {
-		
-	}
-	else {
-		wxMessageBox("Failed to export weapon, failed to create folder.", wxT("vWeaponToolkit"), wxICON_ERROR);
-		return;
+	if (weapon_result != 0) {
+		wxMessageBox(std::string("Failed to export weapon, failed to create folder: ") + c_exportDir, wxT("vWeaponToolkit"), wxICON_ERROR);
+		return false;
 	}
 
 	//Create fxmanifest
@@ -724,8 +793,9 @@ void cWeaponsToolkit::onExportButtonPressed(wxCommandEvent& evt)
 
 	//Copy model assets to stream folder
 	for (cWeaponAsset* a : generatedWeapon->weaponAssets) {
-		std::ifstream  src(a->assetAbsolutePath, std::ios::binary);
-		std::ofstream  dst(exportDirectory + "/" + generatedWeapon->getWeaponName() + "/stream/" + a->assetName, std::ios::binary);
+		std::string srcPath = gen9Directory.empty() ? a->assetAbsolutePath : gen9Directory + "\\" + a->assetName;
+		std::ifstream  src(srcPath, std::ios::binary);
+		std::ofstream  dst(exportDirectory + "/" + folderName + "/stream/" + a->assetName, std::ios::binary);
 
 		dst << src.rdbuf();
 	}
@@ -736,7 +806,7 @@ void cWeaponsToolkit::onExportButtonPressed(wxCommandEvent& evt)
 	exportWeaponArchetypesMeta(c_exportMetasDir);
 	exportWeaponComponentsMeta(c_exportMetasDir);
 
-	wxMessageBox(std::string("Successfully exported weapon to: ") + exportDirectory.c_str() + "\\" + generatedWeapon->getWeaponName(), wxT("vWeaponToolkit"), wxICON_INFORMATION);
+	return true;
 }
 
 void cWeaponsToolkit::exportWeaponsMeta(char* c_exportMetasDir)
@@ -1181,8 +1251,26 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 
 	wxMenu* emptyMenu = new wxMenu;
 
-	menuBar->Append(fileMenu, "&File");;
+	wxMenu* helpMenu = new wxMenu;
+	helpMenu->Append(wxID_HELP, wxT("&How to use"));
+
+	menuBar->Append(fileMenu, "&File");
+	menuBar->Append(helpMenu, "&Help");
 	SetMenuBar(menuBar);
+
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		wxMessageBox(
+			"1. Create Add-on Weapon: choose the folder with your weapon models (.ydr/.ytd), pick a template, "
+			"fill in Weapon Name, ID and Model (file name without extension), press Next.\n"
+			"   Green = required/matched files, blue = component models.\n\n"
+			"2. Configuration: set damage, range, ammo, audio and modifiers.\n\n"
+			"3. Components (optional): choose a template, set name/model/clip size, tick 'Component Enabled' and press Add Component.\n\n"
+			"4. Export: choose an export folder and press Export. Copy the created folder into your FiveM resources "
+			"and add 'ensure <folder>' to server.cfg.\n"
+			"   For FiveM Enhanced: convert models to gen9 first (Alchemist/CodeWalker/Sollumz), tick the Enhanced option "
+			"and select the folder with converted files (same names). A '<name>_enhanced' resource is created too.",
+			"vWeaponsToolkit - How to use", wxOK | wxICON_INFORMATION, this);
+	}, wxID_HELP);
 
 	// Top-level panel to hold all the contents of the frame
 	wxPanel* panel = new wxPanel(this, wxID_ANY);	
@@ -1239,6 +1327,9 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 
 	wxStaticText* weaponModelStaticText = new wxStaticText(createWeaponPanel, wxID_ANY, "Weapon Model:", wxPoint(250, 220));
 	weaponModelTextCtrl = new wxTextCtrl(createWeaponPanel, wxID_ANY, "w_ar_assaultrifle", wxPoint(250,240), wxSize(175, 25));
+
+	new wxStaticText(createWeaponPanel, wxID_ANY, "Model preview (drag = rotate, wheel = zoom, double-click = reset)", wxPoint(445, 20));
+	previewPanel = new cModelPreviewPanel(createWeaponPanel, wxPoint(445, 40), wxSize(335, 315));
 
 	//Event Handlers
 	importerDirectoryPicker->Bind(wxEVT_COMMAND_DIRPICKER_CHANGED, &cWeaponsToolkit::onImportDirectoryChanged, this);
@@ -1339,7 +1430,13 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 	exporterDirectoryPicker = new wxDirPickerCtrl(exportTab, wxID_ANY, "Export Folder", "", wxPoint(20, 370), wxSize(625, 25));
 	wxButton* exportButton = new wxButton(exportTab, wxID_ANY, "Export", wxPoint(675, 370));
 
-	exportListCtrl = new wxListCtrl(exportTab, wxID_ANY, wxPoint(20, 20), wxSize(730, 320), wxLC_REPORT, wxDefaultValidator);
+	exportEnhancedCheckbox = new wxCheckBox(exportTab, wxID_ANY, "Also export FiveM Enhanced (gen9) resource (needs converted models)", wxPoint(20, 285));
+	wxStaticText* enhancedFolderStaticText = new wxStaticText(exportTab, wxID_ANY, "Folder with converted gen9 models (same file names):", wxPoint(20, 312));
+	enhancedDirectoryPicker = new wxDirPickerCtrl(exportTab, wxID_ANY, "", "Gen9 models folder", wxPoint(20, 332), wxSize(625, 25));
+	enhancedDirectoryPicker->Enable(false);
+	exportEnhancedCheckbox->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) { enhancedDirectoryPicker->Enable(e.IsChecked()); });
+
+	exportListCtrl = new wxListCtrl(exportTab, wxID_ANY, wxPoint(20, 20), wxSize(730, 255), wxLC_REPORT, wxDefaultValidator);
 	wxListItem assetColumn;
 	assetColumn.SetId(0);
 	assetColumn.SetText(_("Asset"));

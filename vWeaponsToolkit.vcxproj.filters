@@ -33,6 +33,9 @@
     <ClInclude Include="cWeaponAsset.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cModelPreview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cApp.cpp">
@@ -48,6 +51,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="cWeaponAsset.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cModelPreview.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

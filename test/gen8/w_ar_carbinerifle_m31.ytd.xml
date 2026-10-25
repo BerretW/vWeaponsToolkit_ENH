@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GTA5TextureDictionary version="1">
+ <Textures>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_s</Name>
+   <Unk32 value="128" />
+   <Usage>SPECULAR</Usage>
+   <UsageFlags>X32, X64, X128, X512, X1024, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31</Name>
+   <Unk32 value="128" />
+   <Usage>DIFFUSE</Usage>
+   <UsageFlags>X32, X64, X128, X512, X1024, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_n</Name>
+   <Unk32 value="128" />
+   <Usage>NORMAL</Usage>
+   <UsageFlags>X32, X64, X128, X512, X1024, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_decal</Name>
+   <Unk32 value="128" />
+   <Usage>SPECULAR</Usage>
+   <UsageFlags>X32, X64, X128, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_cr_notes_m31_n</Name>
+   <Unk32 value="128" />
+   <Usage>NORMAL</Usage>
+   <UsageFlags>Y4, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_decal_nm</Name>
+   <Unk32 value="128" />
+   <Usage>NORMAL</Usage>
+   <UsageFlags>X32, X64, X128, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_dpal</Name>
+   <Unk32 value="128" />
+   <Usage>DIFFUSE</Usage>
+   <UsageFlags>Y4, X8, X16, Y64, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_cr_notes_m31_s</Name>
+   <Unk32 value="128" />
+   <Usage>SPECULAR</Usage>
+   <UsageFlags>X32, X64, X128, X512, X1024, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_carbinerifle_m31_decalw_ar_carbinerifle_m31_decal_am</Name>
+   <Unk32 value="128" />
+   <Usage>DIFFUSE</Usage>
+   <UsageFlags>X64, Y64, X256, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+  <Item>
+   <Name>w_ar_cr_notes_m31_d</Name>
+   <Unk32 value="128" />
+   <Usage>DIFFUSE</Usage>
+   <UsageFlags>X32, X64, X128, X512, X1024, UNK24</UsageFlags>
+   <ExtraFlags value="0" />
+  </Item>
+ </Textures>
+</GTA5TextureDictionary>

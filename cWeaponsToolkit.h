@@ -6,6 +6,7 @@
 #include <wx/richtext/richtextprint.h>
 #include <wx/listctrl.h>
 #include "cWeapon.h"
+#include "cModelPreview.h"
 
 class cWeaponsToolkit : public wxFrame
 {
@@ -19,8 +20,11 @@ private:
 	wxPanel* componentsTab;
 	wxPanel* exportTab;
 	wxListCtrl* filesFoundListCtrl;
+	cModelPreviewPanel* previewPanel = nullptr;
 	wxDirPickerCtrl* importerDirectoryPicker;
 	wxDirPickerCtrl* exporterDirectoryPicker;
+	wxDirPickerCtrl* enhancedDirectoryPicker;
+	wxCheckBox* exportEnhancedCheckbox;
 	wxComboBox* audioItemComboBox;
 	wxTextCtrl* weaponNameTextCtrl;
 	wxTextCtrl* weaponIdTextCtrl;
@@ -63,6 +67,7 @@ private:
 	void onCreateWeaponNextButtonChanged(wxCommandEvent& evt);
 	void searchForWeaponAssets(const std::wstring& directory);
 	void validateWeaponAssets();
+	void updateModelPreview();
 	std::string removeWeaponFileExtension(std::string s);
 	void onAddComponent(wxCommandEvent& evt);
 	void onRemoveComponent(wxCommandEvent& evt);
@@ -75,6 +80,7 @@ private:
 	void onComponentEnabledCheckboxChanged(wxCommandEvent& evt);
 	void onExportDirectoryChanged(wxCommandEvent& evt);
 	void onExportButtonPressed(wxCommandEvent& evt);
+	bool exportResource(const std::string& folderName, const std::string& gen9Directory);
 	void onAudioItemChanged(wxCommandEvent& evt);
 	void onAmmoTypeChanged(wxCommandEvent& evt);
 	void onDamageTypeChanged(wxCommandEvent& evt);

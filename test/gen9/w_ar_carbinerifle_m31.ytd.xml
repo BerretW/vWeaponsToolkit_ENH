@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TextureDictionary>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_s</Name>
+  <Unk32 value="0" />
+  <Usage>SPECULAR</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="1024" />
+  <Height value="1024" />
+  <MipLevels value="9" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31_s.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31</Name>
+  <Unk32 value="0" />
+  <Usage>DIFFUSE</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="1024" />
+  <Height value="1024" />
+  <MipLevels value="9" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_n</Name>
+  <Unk32 value="0" />
+  <Usage>NORMAL</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="1024" />
+  <Height value="1024" />
+  <MipLevels value="9" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31_n.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_decal</Name>
+  <Unk32 value="0" />
+  <Usage>SPECULAR</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="256" />
+  <Height value="256" />
+  <MipLevels value="7" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31_decal.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_cr_notes_m31_n</Name>
+  <Unk32 value="0" />
+  <Usage>NORMAL</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="4" />
+  <Height value="4" />
+  <MipLevels value="1" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_cr_notes_m31_n.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_decal_nm</Name>
+  <Unk32 value="0" />
+  <Usage>NORMAL</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="256" />
+  <Height value="256" />
+  <MipLevels value="7" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31_decal_nm.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_dpal</Name>
+  <Unk32 value="0" />
+  <Usage>DIFFUSE</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="128" />
+  <Height value="32" />
+  <MipLevels value="4" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_carbinerifle_m31_dpal.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_cr_notes_m31_s</Name>
+  <Unk32 value="0" />
+  <Usage>SPECULAR</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="1024" />
+  <Height value="1024" />
+  <MipLevels value="9" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_cr_notes_m31_s.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_carbinerifle_m31_decalw_ar_carbinerifle_m31_decal_am</Name>
+  <Unk32 value="0" />
+  <Usage>DIFFUSE</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="256" />
+  <Height value="256" />
+  <MipLevels value="7" />
+  <Format>D3DFMT_DXT5</Format>
+  <FileName>w_ar_carbinerifle_m31_decalw_ar_carbinerifle_m31_decal_am.dds</FileName>
+ </Item>
+ <Item>
+  <Name>w_ar_cr_notes_m31_d</Name>
+  <Unk32 value="0" />
+  <Usage>DIFFUSE</Usage>
+  <UsageFlags>0</UsageFlags>
+  <ExtraFlags value="0" />
+  <Width value="1024" />
+  <Height value="1024" />
+  <MipLevels value="9" />
+  <Format>D3DFMT_DXT1</Format>
+  <FileName>w_ar_cr_notes_m31_d.dds</FileName>
+ </Item>
+</TextureDictionary>
