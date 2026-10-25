@@ -73,24 +73,80 @@ does not resize images silently. It builds the dictionary before saving and
 uses a temporary file so a failed conversion does not truncate an existing
 output file.
 
-**This is not yet the GLB-to-resource workflow.** GLB import, PBR material
-mapping, `.ydr` writing, skeletons, component attachment points and LOD
-generation remain to be implemented. The new `.ytd` writer is checked by
+**This is not yet the GLB-to-resource workflow.** GLB export integration, PBR material
+mapping, skeletons, component attachment points and LOD generation remain
+to be implemented. The new `.ytd` writer is checked by
 native round-trip tests and an independent Python reader against both
 generations of the supplied assets; in-game validation is still required.
+
+### Built-in converter: static drawable backend milestone
+
+The native `buildYdr` API in [cYdrWriter.h](cYdrWriter.h) now creates binary
+`.ydr` files for **Legacy (gen8)** and **Enhanced (gen9)** without an external
+converter. This is a backend for the GLB conversion pipeline, **not yet
+connected to a GUI YDR export command**.
+
+- Supports multiple indexed triangle meshes and materials, positions, normals,
+  vertex colors, UVs and tangent handedness.
+- Writes vertex/index declarations, shader parameters, external texture
+  references, bounds and a conservative bounding sphere for each generation.
+- Accepts 1..128 meshes/materials and 3..65,535 vertices per mesh. Larger
+  meshes must be split by the caller; indices are validated before conversion
+  to 16 bits. Invalid vectors, triangles, material references and oversized
+  inputs are rejected explicitly.
+- Currently supports only the verified **`normal_spec_decal`** material
+  profile (render bucket 2), with diffuse, normal and specular texture
+  references. It is not a general opaque weapon/PBR material converter.
+  Normal/specular maps must come from an appropriate texture pipeline; the
+  diffuse-only PNG command above must not be used to generate them.
+- Produces static high-LOD geometry only: no skeleton, bone weights, component
+  attachment points, collision or automatic LODs, and no embedded textures.
+
+Native tests generate models for both generations and load them back through
+the preview reader. An independent Python reader checks vertex attributes,
+indices, material mappings, bounds, declarations and shader buffer/resource
+layouts, including the 65,535-vertex boundary. Gen9 shader metadata is also
+compared with the supplied model fixture.
+
+**GLB export integration, weapon-specific opaque material profiles, rigging and integration
+with resource export remain unfinished.** These generated drawables have not
+yet been validated in GTA/FiveM; a binary round trip is not an in-game test.
+
+### GLB import and model preparation
+
+Use **Import GLB...** on the first tab or **Tools > Import GLB for
+inspection...**. A separate window shows the assembled model, named
+node/mesh/primitive rows, vertex/triangle counts and material names. Choose
+**All parts** or a part in the left list; drag to rotate, scroll to zoom.
+Your existing weapon configuration and `.ydr/.ytd` export are not changed.
+
+The native importer reads embedded GLB 2.0 triangle geometry, scene/node
+transforms, normals, UVs, tangents, vertex colors, base-color factors and
+PNG/JPEG textures. It preserves metres/origin and converts Y-up to Z-up.
+Mirrored/nonuniform transforms are handled explicitly. Missing normals
+generate flat faces; missing tangents and preview limitations are reported.
+Unsupported inputs fail with a diagnostic rather than dropping meshes.
+
+**This is static inspection, not GLB-to-resource export.** There is no
+automatic PBR-to-GTA material conversion, rigging or component generation.
+The preview is base-color/basic lighting only, not PBR/alpha rendering.
+See [MODEL_IMPORT.md](MODEL_IMPORT.md) for limits and the proposed authoring
+hierarchy: fixed body together, moving parts and removable components
+separate, meaningful origins/pivots and future attachment markers.
 
 ## License
 
 GPL-3.0 (see [LICENSE](LICENSE)). Format research references and preserved
 third-party notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
-The new resource/texture writer is an original implementation, not a port
+The new resource/texture/drawable writers are original implementations, not a port
 of CodeWalker. CodeWalker's source is marked educational-use-only, not
 generally GPL; Sollumz's license does not grant permission to copy CodeWalker.
-Neither tool is required at runtime.
+Neither tool is required at runtime. GLB parsing uses the vendored,
+MIT-licensed cgltf 1.15; it adds no external runtime dependency.
 
 ## Building
 
-Requires Visual Studio 2026 (toolset v145, C++ desktop workload) and wxWidgets (e.g. `vcpkg install wxwidgets:x64-windows` followed by `vcpkg integrate install`). The post-build step copies `templates`, `export` and `icon.ico` next to the exe, so the output folder (e.g. `x64\Release`) is runnable as is.
+Requires Visual Studio 2026 (toolset v145, C++ desktop workload) and wxWidgets (e.g. `vcpkg install wxwidgets:x64-windows` followed by `vcpkg integrate install`). The post-build step copies `templates`, `export`, `icon.ico`, licenses and user documentation next to the exe, so the output folder (e.g. `x64\Release`) is runnable as is.
 
 ### Resource writer tests
 
@@ -111,6 +167,13 @@ Tests cover page sizing/version flags, raw DEFLATE, pointers, dictionary
 hash ordering, gen9 SRVs, BC1/BC3 color/alpha error limits, mip chains,
 invalid inputs, deterministic output, Unicode output paths and loading
 new dictionaries with the supplied gen8/gen9 regular and high-LOD drawables.
+Drawable tests additionally cover single/multiple meshes and materials,
+vertex/index round trips, bounds, legacy parameter blocks, gen9 constant
+buffer copies and resource slots, and invalid geometry/material inputs.
+GLB tests cover hierarchy/instances, inverse-transpose normals, mirrored
+winding/tangents, UV/color/material data, embedded PNG alpha/JPEG, per-part
+selection, flat-normal generation, Unicode paths and malformed/unsupported
+inputs. The generated `static_import.glb` can also be opened in the GUI.
 Generated fixtures and test binaries stay under the ignored `tests\x64` directory.
 
 ## Planned #TODO

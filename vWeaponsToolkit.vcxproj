@@ -155,6 +155,10 @@
     <ClInclude Include="cModelPreview.h" />
     <ClInclude Include="cRscWriter.h" />
     <ClInclude Include="cYtdWriter.h" />
+    <ClInclude Include="cAssetFormat.h" />
+    <ClInclude Include="cYdrWriter.h" />
+    <ClInclude Include="cGlbImporter.h" />
+    <ClInclude Include="third_party\cgltf.h" />
     <ClInclude Include="cWeaponComponent.h" />
     <ClInclude Include="cWeaponsToolkit.h" />
     <ClInclude Include="targetver.h" />
@@ -166,6 +170,8 @@
     <ClCompile Include="cModelPreview.cpp" />
     <ClCompile Include="cRscWriter.cpp" />
     <ClCompile Include="cYtdWriter.cpp" />
+    <ClCompile Include="cYdrWriter.cpp" />
+    <ClCompile Include="cGlbImporter.cpp" />
     <ClCompile Include="cWeaponComponent.cpp" />
     <ClCompile Include="cWeaponsToolkit.cpp" />
   </ItemGroup>
@@ -178,7 +184,7 @@
     <Exec Command="xcopy &quot;$(ProjectDir)export&quot; &quot;$(OutDir)export\&quot; /E /I /Y /Q" Condition="Exists('$(ProjectDir)export')" />
     <MakeDir Directories="$(OutDir)export" />
     <Copy SourceFiles="$(ProjectDir)icon.ico" DestinationFolder="$(OutDir)" />
-    <Copy SourceFiles="$(ProjectDir)LICENSE;$(ProjectDir)THIRD_PARTY_NOTICES.txt;$(ProjectDir)README.md" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="$(ProjectDir)LICENSE;$(ProjectDir)THIRD_PARTY_NOTICES.txt;$(ProjectDir)README.md;$(ProjectDir)MODEL_IMPORT.md" DestinationFolder="$(OutDir)" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

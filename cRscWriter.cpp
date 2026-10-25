@@ -80,6 +80,14 @@ void cRscWriter::u64(uint64_t address, uint64_t value)
 	bytes(address, b, sizeof(b));
 }
 
+void cRscWriter::f32(uint64_t address, float value)
+{
+	static_assert(sizeof(float) == sizeof(uint32_t), "RSC7 requires 32-bit floats.");
+	uint32_t bits;
+	std::memcpy(&bits, &value, sizeof(bits));
+	u32(address, bits);
+}
+
 std::vector<uint8_t> cRscWriter::build(uint8_t version) const
 {
 	if (system.size() < 16)

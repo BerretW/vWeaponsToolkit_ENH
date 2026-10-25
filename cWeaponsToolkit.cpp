@@ -11,6 +11,7 @@
 #include <direct.h>
 #include "cWeaponAsset.h"
 #include "cYtdWriter.h"
+#include "cGlbImporter.h"
 #include "cRscWriter.h"
 #include <wx/choicdlg.h>
 #include <wx/filedlg.h>
@@ -1273,6 +1274,75 @@ void cWeaponsToolkit::searchForWeaponAssets(const std::wstring& directory)
 	}
 }
 
+void cWeaponsToolkit::onImportGlb(wxCommandEvent&)
+{
+	wxFileDialog input(this, "Import static GLB for inspection", wxEmptyString, wxEmptyString,
+		"Binary glTF (*.glb)|*.glb", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	if (input.ShowModal() != wxID_OK) return;
+	try
+	{
+		GlbModel imported;
+		{
+			wxBusyCursor busy;
+			imported = loadGlb(input.GetPath());
+		}
+		wxDialog dialog(this, wxID_ANY, "GLB inspection - " + wxFileName(input.GetPath()).GetFullName(),
+			wxDefaultPosition, wxSize(1100, 720), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+		auto* layout = new wxBoxSizer(wxVERTICAL);
+		auto* heading = new wxStaticText(&dialog, wxID_ANY,
+			"Static GLB inspection only - does not change the current weapon or export a resource.\n"
+			"Select a part on the left. Drag to rotate, wheel to zoom, double-click to reset. Units: metres; axes: Z-up.");
+		layout->Add(heading, 0, wxALL | wxEXPAND, 10);
+		auto* row = new wxBoxSizer(wxHORIZONTAL);
+		auto* parts = new wxListCtrl(&dialog, wxID_ANY, wxDefaultPosition, wxSize(480, 400), wxLC_REPORT | wxLC_SINGLE_SEL);
+		parts->InsertColumn(0, "Node / mesh / primitive", wxLIST_FORMAT_LEFT, 250);
+		parts->InsertColumn(1, "Vertices", wxLIST_FORMAT_RIGHT, 65);
+		parts->InsertColumn(2, "Tris", wxLIST_FORMAT_RIGHT, 55);
+		parts->InsertColumn(3, "Material", wxLIST_FORMAT_LEFT, 105);
+		parts->InsertItem(0, "All parts");
+		for (size_t i = 0; i < imported.parts.size(); ++i)
+		{
+			const auto& part = imported.parts[i];
+			const auto index = parts->InsertItem(static_cast<long>(i+1), wxString::FromUTF8(part.name));
+			parts->SetItem(index, 1, wxString::Format("%zu", part.geometry.vertices.size()));
+			parts->SetItem(index, 2, wxString::Format("%zu", part.geometry.indices.size()/3));
+			parts->SetItem(index, 3, wxString::FromUTF8(imported.materials[part.geometry.material].name));
+		}
+		auto* preview = new cModelPreviewPanel(&dialog, wxDefaultPosition, wxSize(500, 400));
+		row->Add(parts, 1, wxEXPAND | wxRIGHT, 8);
+		row->Add(preview, 1, wxEXPAND);
+		layout->Add(row, 1, wxEXPAND | wxLEFT | wxRIGHT, 10);
+		wxString report;
+		for (const auto& text : imported.warnings) report += "- " + wxString::FromUTF8(text) + "\n";
+		auto* notices = new wxTextCtrl(&dialog, wxID_ANY, report, wxDefaultPosition, wxSize(-1, 100),
+			wxTE_MULTILINE | wxTE_READONLY);
+		layout->Add(notices, 0, wxEXPAND | wxALL, 10);
+		layout->Add(dialog.CreateButtonSizer(wxCLOSE), 0, wxALIGN_RIGHT | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+		dialog.SetSizer(layout);
+		dialog.SetMinSize(wxSize(900, 600));
+		preview->showModel(makeGlbPreview(imported));
+		parts->SetItemState(0, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+		parts->Bind(wxEVT_LIST_ITEM_SELECTED, [&](wxListEvent& evt) {
+			try
+			{
+				wxBusyCursor busy;
+				preview->showModel(makeGlbPreview(imported, static_cast<int>(evt.GetIndex())-1));
+			}
+			catch (const std::exception& error)
+			{
+				wxMessageBox(wxString::FromUTF8(error.what()), "GLB preview failed", wxOK | wxICON_ERROR, &dialog);
+			}
+		});
+		dialog.Bind(wxEVT_BUTTON, [&dialog](wxCommandEvent&) { dialog.EndModal(wxID_CLOSE); }, wxID_CLOSE);
+		dialog.CentreOnParent();
+		dialog.ShowModal();
+	}
+	catch (const std::exception& error)
+	{
+		wxMessageBox(wxString::FromUTF8(error.what()), "GLB import failed", wxOK | wxICON_ERROR, this);
+	}
+}
+
 void cWeaponsToolkit::onBuildTextureDictionary(wxCommandEvent&)
 {
 	wxFileDialog input(this, "Select diffuse textures (power-of-two PNGs, up to 4096)",
@@ -1356,12 +1426,16 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 
 	menuBar->Append(fileMenu, "&File");
 	wxMenu* toolsMenu = new wxMenu;
+	const auto glbToolId = wxWindow::NewControlId();
+	toolsMenu->Append(glbToolId, "Import GLB for inspection...");
+	toolsMenu->AppendSeparator();
 	const auto textureToolId = wxWindow::NewControlId();
 	toolsMenu->Append(textureToolId, "Build texture dictionary from PNG...");
 	menuBar->Append(toolsMenu, "&Tools");
 	menuBar->Append(helpMenu, "&Help");
 	SetMenuBar(menuBar);
 	Bind(wxEVT_MENU, &cWeaponsToolkit::onBuildTextureDictionary, this, textureToolId);
+	Bind(wxEVT_MENU, &cWeaponsToolkit::onImportGlb, this, glbToolId);
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		wxMessageBox(
@@ -1377,7 +1451,11 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 			"Tools > Build texture dictionary from PNG: select diffuse PNGs (power-of-two sizes, "
 			"4..4096 for gen8 or 1..4096 for gen9), "
 			"choose gen8 or gen9 and save a .ytd. Names come from PNG file names. "
-			"This does not yet convert GLB geometry.",
+			"This does not yet convert GLB geometry.\n\n"
+			"Import GLB: use the button on the first tab or Tools > Import GLB for inspection. "
+			"Embedded GLB 2.0, static triangles, PNG/JPEG textures. Select individual named parts in the left list. "
+			"This is an inspection step, not weapon/resource export. Separate body, moving parts and optional "
+			"components in your source model; see MODEL_IMPORT.md next to the executable for the proposed structure.",
 			"vWeaponsToolkit - How to use", wxOK | wxICON_INFORMATION, this);
 	}, wxID_HELP);
 
@@ -1414,6 +1492,8 @@ cWeaponsToolkit::cWeaponsToolkit() : wxFrame(nullptr, wxID_ANY, "vWeaponsToolkit
 
 
 	//TAB 1 - Create Add-on Weapon
+	auto* glbButton = new wxButton(createWeaponPanel, wxID_ANY, "Import GLB...", wxPoint(20, 5), wxSize(200, 28));
+	glbButton->Bind(wxEVT_BUTTON, &cWeaponsToolkit::onImportGlb, this);
 	filesFoundListCtrl = new wxListCtrl(createWeaponPanel, wxID_ANY, wxPoint(20, 40), wxSize(200, 320), wxLC_REPORT, wxDefaultValidator);
 	wxListItem col0;
 	col0.SetId(0);

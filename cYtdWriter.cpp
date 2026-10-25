@@ -14,26 +14,9 @@ namespace
 {
 	using Pixel = std::array<uint8_t, 4>;
 
-	uint32_t hashName(const std::string& name)
-	{
-		uint32_t h = 0;
-		for (unsigned char c : name) { h += c; h += h << 10; h ^= h >> 6; }
-		h += h << 3; h ^= h >> 11; h += h << 15;
-		return h;
-	}
-
 	std::string normalizeName(const std::string& name)
 	{
-		if (name.empty() || name.size() > 127)
-			throw std::invalid_argument("Texture names must contain 1..127 ASCII letters, digits or underscores.");
-		std::string result;
-		for (unsigned char c : name)
-		{
-			if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-			if (!(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') && c != '_')
-				throw std::invalid_argument("Invalid texture name: " + name);
-			result.push_back(static_cast<char>(c));
-		}
+		std::string result = normalizeAssetName(name, "Texture");
 		if (result.compare(0, 10, "script_rt_") == 0)
 			throw std::invalid_argument("script_rt_ textures require an uncompressed runtime-texture export, not BC1/BC3.");
 		return result;
@@ -195,7 +178,7 @@ namespace
 	EncodedTexture encode(const YtdImage& image, const std::string& name, bool gen9)
 	{
 		EncodedTexture t;
-		t.name = name; t.hash = hashName(name); t.width = image.width; t.height = image.height;
+		t.name = name; t.hash = assetNameHash(name); t.width = image.width; t.height = image.height;
 		t.alpha = false;
 		for (size_t i = 3; i < image.rgba.size(); i += 4)
 			if (image.rgba[i] != 255) { t.alpha = true; break; }
@@ -249,7 +232,7 @@ std::vector<uint8_t> buildYtd(const std::vector<YtdImage>& images, GameGeneratio
 		if (inputBytes > 128 * 1024 * 1024)
 			throw std::length_error("Texture input exceeds the 128 MiB RGBA limit per dictionary.");
 		auto name = normalizeName(image.name);
-		if (!hashes.insert(hashName(name)).second)
+		if (!hashes.insert(assetNameHash(name)).second)
 			throw std::invalid_argument("Duplicate texture name or hash collision: " + name);
 		names.push_back(std::move(name));
 	}

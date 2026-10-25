@@ -82,6 +82,7 @@ private:
 	void onExportDirectoryChanged(wxCommandEvent& evt);
 	void onExportButtonPressed(wxCommandEvent& evt);
 	void onBuildTextureDictionary(wxCommandEvent& evt);
+	void onImportGlb(wxCommandEvent& evt);
 	bool exportResource(const std::string& folderName, const std::string& gen9Directory);
 	void onAudioItemChanged(wxCommandEvent& evt);
 	void onAmmoTypeChanged(wxCommandEvent& evt);

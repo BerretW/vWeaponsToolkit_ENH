@@ -4,10 +4,15 @@
 #include <wx/zstream.h>
 #include "cRscWriter.h"
 #include "cYtdWriter.h"
+#include "cYdrWriter.h"
 #include "cModelPreview.h"
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <cmath>
+#include <limits>
+
+void testGlbImporter(const wxString& output);
 
 namespace
 {
@@ -84,6 +89,118 @@ namespace
 			image.rgba.insert(image.rgba.end(), { r, g, b, 255 });
 		return image;
 	}
+
+	void testDrawableWriter(const wxString& output)
+	{
+		auto path = [&](const wxString& name) { return wxFileName(output, name).GetFullPath(); };
+		YdrDrawable input;
+		input.name = "W_TEST_STATIC";
+		YdrMaterial material;
+		material.diffuseTexture = "OPAQUE"; material.normalTexture = "flat_normal"; material.specularTexture = "black_spec";
+		input.materials.push_back(material);
+		material.diffuseTexture = "alpha"; material.bumpiness = 0.7f; material.wetness = 0.25f;
+		material.specularIntensity = 0.5f; material.specularFalloff = 40; material.specularFresnel = 0.75f;
+		input.materials.push_back(material);
+		YdrMesh first;
+		const std::array<float, 3> positions[4] = { {-2, -1, 0}, {0, -1, 0}, {0, 1, 0}, {-2, 1, 0} };
+		const std::array<float, 2> coords[4] = { {0, 0}, {1, 0}, {1, 1}, {0, 1} };
+		for (unsigned i = 0; i < 4; ++i)
+		{
+			YdrVertex v; v.position = positions[i]; v.uv = coords[i];
+			v.color = { 128, 64, 32, 255 };
+			first.vertices.push_back(v);
+		}
+		first.indices = { 0, 1, 2, 0, 2, 3 };
+		input.meshes.push_back(first);
+		auto second = first;
+		second.material = 1; second.indices = { 0, 2, 1, 0, 3, 2 };
+		for (auto& v : second.vertices)
+		{
+			v.position[0] += 3; v.position[2] = 1;
+			v.tangent = { -1, 0, 0, -1 }; v.color = { 25, 80, 150, 200 };
+			v.uv[0] -= 0.25f; v.uv[1] *= 2;
+		}
+		input.meshes.push_back(second);
+		auto alpha = solid("alpha", 8, 8, 40, 200, 60);
+		for (size_t i = 3; i < alpha.rgba.size(); i += 4) alpha.rgba[i] = 128;
+		const std::vector<YtdImage> textures = { solid("opaque", 8, 8, 200, 100, 50), alpha,
+			solid("flat_normal", 4, 4, 128, 128, 255), solid("black_spec", 4, 4, 0, 0, 0) };
+		for (const auto gen : { GameGeneration::Legacy, GameGeneration::Enhanced })
+		{
+			const wxString prefix = gen == GameGeneration::Legacy ? "gen8" : "gen9";
+			const auto ytd = path(prefix + "_static.ytd");
+			cRscWriter::save(ytd, buildYtd(textures, gen));
+			const auto binary = buildYdr(input, gen);
+			require(binary == buildYdr(input, gen), "Drawable output must be deterministic.");
+			const auto ydr = path(prefix + "_static.ydr");
+			cRscWriter::save(ydr, binary);
+			PreviewModel preview;
+			std::string error;
+			const bool loaded = loadPreviewModel(ydr.ToStdString(), { ytd.ToStdString() }, preview, error);
+			require(loaded, error.c_str());
+			require(preview.meshes.size() == 2 && preview.textures.size() == 2, "New drawable mesh/material round trip.");
+			for (size_t i = 0; i < input.meshes.size(); ++i)
+			{
+				const auto& actual = preview.meshes[i];
+				const auto& expected = input.meshes[i];
+				require(actual.idx == expected.indices && actual.texture >= 0, "Index/material round trip.");
+				for (size_t v = 0; v < expected.vertices.size(); ++v)
+				{
+					for (unsigned k = 0; k < 3; ++k)
+					{
+						require(actual.pos[v * 3 + k] == expected.vertices[v].position[k], "Position round trip.");
+						require(actual.nrm[v * 3 + k] == expected.vertices[v].normal[k], "Normal round trip.");
+					}
+					for (unsigned k = 0; k < 2; ++k)
+						require(actual.uv[v * 2 + k] == expected.vertices[v].uv[k], "UV round trip.");
+				}
+			}
+			require(preview.bmin[0] == -2 && preview.bmax[0] == 3 && preview.bmax[2] == 1, "New drawable bounds.");
+			std::cout << prefix << " generated: " << preview.info << '\n';
+			auto single = input;
+			single.materials.resize(1); single.meshes.resize(1);
+			cRscWriter::save(path(prefix + "_single.ydr"), buildYdr(single, gen));
+			auto boundary = single;
+			boundary.meshes[0].vertices.resize(65535, first.vertices[0]);
+			boundary.meshes[0].vertices[65534] = first.vertices[2];
+			boundary.meshes[0].indices = { 0, 1, 65534 };
+			cRscWriter::save(path(prefix + "_boundary.ydr"), buildYdr(boundary, gen));
+			boundary.meshes[0].vertices.push_back(first.vertices[0]);
+			fails([&] { buildYdr(boundary, gen); }, "65535");
+		}
+		fails([&] { buildYdr(input, static_cast<GameGeneration>(-1)); }, "generation");
+		auto bad = input; bad.name = "../bad";
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "name");
+		bad = input; bad.materials.clear();
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "1..128");
+		bad = input; bad.meshes.resize(129, first);
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "1..128");
+		bad = input; bad.meshes[0].material = 2;
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "material index");
+		bad = input; bad.meshes[0].indices[0] = 65536;
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "index is out of range");
+		bad = input; bad.meshes[0].indices.pop_back();
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "complete triangles");
+		bad = input; bad.meshes[0].indices[1] = 0;
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "Degenerate");
+		bad = input; bad.meshes[0].vertices[0].position[0] = std::numeric_limits<float>::quiet_NaN();
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "finite");
+		bad = input; bad.meshes[0].vertices[0].uv[0] = std::numeric_limits<float>::infinity();
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "finite");
+		bad = input; bad.meshes[0].vertices[0].normal = { 0, 0, 0 };
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "unit vector");
+		bad = input; bad.meshes[0].vertices[0].tangent = { 0, 0, 1, 1 };
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "perpendicular");
+		bad = input; bad.meshes[0].vertices[0].tangent[3] = 0;
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "handedness");
+		bad = input; bad.materials[0].normalTexture.clear();
+		fails([&] { buildYdr(bad, GameGeneration::Enhanced); }, "Texture names");
+		bad = input; bad.materials[0].specularIntensity = -1;
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "nonnegative");
+		bad = input; bad.lodDistance = 0;
+		fails([&] { buildYdr(bad, GameGeneration::Legacy); }, "positive");
+		std::cout << "Drawable validation/boundary tests passed.\n";
+	}
 }
 
 int main(int argc, char** argv)
@@ -96,6 +213,9 @@ int main(int argc, char** argv)
 		const wxString repo = wxString::FromUTF8(argv[1]), output = wxString::FromUTF8(argv[2]);
 		require(wxDirExists(output), "Output directory must exist.");
 		auto path = [&](const wxString& name) { return wxFileName(output, name).GetFullPath(); };
+		require(assetNameHash("DiffuseSampler") == 0xf1fe2b71, "Case-insensitive shader hashes.");
+		testDrawableWriter(output);
+		testGlbImporter(output);
 		testContainer(64, 0, path("system_only.rsc"));
 		testContainer(8192, 8193, path("page_growth.rsc"));
 		testContainer(48, 16 * 1024 * 1024 + 1, path("large_page.rsc"));

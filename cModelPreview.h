@@ -16,6 +16,7 @@ struct PreviewMesh
 	std::vector<float> pos;
 	std::vector<float> nrm;
 	std::vector<float> uv;
+	std::vector<float> colors;
 	std::vector<uint32_t> idx;
 	int texture = -1;
 };
@@ -38,6 +39,7 @@ public:
 	cModelPreviewPanel(wxWindow* parent, const wxPoint& pos, const wxSize& size);
 
 	void showModel(const std::string& ydrPath, const std::vector<std::string>& ytdPaths);
+	void showModel(PreviewModel loaded);
 	void clearModel(const wxString& message);
 
 private:

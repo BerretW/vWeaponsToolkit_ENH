@@ -15,6 +15,7 @@ public:
 	void u16(uint64_t address, uint16_t value);
 	void u32(uint64_t address, uint32_t value);
 	void u64(uint64_t address, uint64_t value);
+	void f32(uint64_t address, float value);
 
 	// Root block must be the first system allocation and contain ResourceFileBase.
 	std::vector<uint8_t> build(uint8_t version) const;

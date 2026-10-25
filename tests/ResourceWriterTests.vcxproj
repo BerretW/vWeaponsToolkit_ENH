@@ -39,8 +39,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ResourceWriterTests.cpp" />
+    <ClCompile Include="GlbImporterTests.cpp" />
     <ClCompile Include="..\cRscWriter.cpp" />
     <ClCompile Include="..\cYtdWriter.cpp" />
+    <ClCompile Include="..\cYdrWriter.cpp" />
+    <ClCompile Include="..\cGlbImporter.cpp" />
     <ClCompile Include="..\cModelPreview.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

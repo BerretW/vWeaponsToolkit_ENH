@@ -722,7 +722,8 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 					float shade = 0.75f;
 					if (nl > 1e-6f) shade = 0.35f + 0.65f * std::fabs((n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / nl);
 
-					float rgb[3] = { 190, 190, 190 };
+					const float base = mesh.colors.empty() ? 190.0f : 255.0f;
+					float rgb[3] = { base, base, base };
 					if (tex)
 					{
 						float u = w0 * mesh.uv[i0 * 2] + w1 * mesh.uv[i1 * 2] + w2 * mesh.uv[i2 * 2];
@@ -733,6 +734,14 @@ static wxImage renderModel(const PreviewModel& m, int W, int H, float yaw, float
 						const uint8_t* s = &tex->rgba[((size_t)ty * tex->width + tx) * 4];
 						rgb[0] = s[0]; rgb[1] = s[1]; rgb[2] = s[2];
 					}
+					if (!mesh.colors.empty())
+						for (int k = 0; k < 3; ++k)
+						{
+							const float factor = w0*mesh.colors[i0*3+k] + w1*mesh.colors[i1*3+k] + w2*mesh.colors[i2*3+k];
+							const float srgb = rgb[k]/255.0f;
+							const float linear = (srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f)) * factor;
+							rgb[k] = 255*(linear <= 0.0031308f ? 12.92f*linear : 1.055f*std::pow(linear, 1/2.4f)-0.055f);
+						}
 					zb = z;
 					uint8_t* o = out + ((size_t)y * W + x) * 3;
 					for (int k = 0; k < 3; k++) o[k] = (uint8_t)std::min(255.0f, rgb[k] * shade);
@@ -766,6 +775,11 @@ void cModelPreviewPanel::showModel(const std::string& ydrPath, const std::vector
 		clearModel("Preview unavailable: " + wxString(err));
 		return;
 	}
+	showModel(std::move(loaded));
+}
+
+void cModelPreviewPanel::showModel(PreviewModel loaded)
+{
 	model = std::move(loaded);
 	hasModel = true;
 	float ex = model.bmax[0] - model.bmin[0], ey = model.bmax[1] - model.bmin[1];

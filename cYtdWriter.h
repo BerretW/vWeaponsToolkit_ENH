@@ -1,9 +1,8 @@
 #pragma once
+#include "cAssetFormat.h"
 #include <cstdint>
 #include <string>
 #include <vector>
-
-enum class GameGeneration { Legacy, Enhanced };
 
 struct YtdImage
 {

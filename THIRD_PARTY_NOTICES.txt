@@ -1,14 +1,15 @@
-RSC7 / texture dictionary format implementation
-==============================================
+RSC7 / texture dictionary / drawable format implementations
+=========================================================
 
-cRscWriter.cpp and cYtdWriter.cpp are original implementations of the RSC7
-and texture dictionary binary formats. The format was inspected in local
+cRscWriter.cpp, cYtdWriter.cpp and cYdrWriter.cpp are original implementations
+of the RSC7, texture dictionary and drawable binary formats. The formats were inspected in local
 gen8/gen9 sample resources and cross-referenced with the following CodeWalker
 files by dexyfex and contributors:
 https://github.com/dexyfex/CodeWalker
   CodeWalker.Core/GameFiles/Resources/ResourceBuilder.cs
   CodeWalker.Core/GameFiles/Resources/ResourceFile.cs
   CodeWalker.Core/GameFiles/Resources/Texture.cs
+  CodeWalker.Core/GameFiles/Resources/Drawable.cs
 
 CodeWalker is NOT generally licensed under GPL-3.0. Its Readme_Src.txt states:
 "This source code is released for educational purposes only."
@@ -16,12 +17,76 @@ No CodeWalker implementation is copied into the new writer. Binary field
 layouts, format identifiers and runtime metadata are interoperability facts;
 BC1/BC3 encoding, diffuse mipmap generation, single-page allocation and the
 C++ API are local implementations. The application license is in LICENSE.
-Sollumz is a reference for the future GLB/material workflow, not a runtime
-dependency, and no Sollumz code is included in this milestone.
+Sollumz/szio shader definitions and parameter defaults were also consulted:
+https://github.com/Sollumz/szio
+  src/szio/gta5/Shaders.xml
+  src/szio/gta5/ShadersG9ParamsDefaults.json
+  src/szio/gta5/ShadersG9TextureNameMapping.json
+The normal_spec_decal binary binding layout was checked against the supplied
+gen9 model, not inferred from defaults alone. Sollumz, szio and pymateria
+are not runtime dependencies. No restricted CodeWalker implementation has
+been ported. The MIT notice for szio is preserved below.
 
 The following notice is preserved from CodeWalker's ResourceFile.cs:
 
 Copyright(c) 2015 Neodymium
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+cgltf 1.15 (including its embedded jsmn parser)
+=============================================
+
+Vendored unmodified in third_party/cgltf.h:
+https://github.com/jkuhlmann/cgltf/tree/v1.15
+https://raw.githubusercontent.com/jkuhlmann/cgltf/v1.15/cgltf.h
+SHA-256: e378a21c084bf1f288bb799de827bb26906efb024255f1ecf1705ea13f11c6ec
+Used for GLB parsing/accessors/validation and node transforms, compiled into
+the application. No external converter or parser runtime is required.
+The original notices are retained in the header and reproduced here.
+
+Copyright (c) 2018-2021 Johannes Kuhlmann
+Copyright (c) 2010 Serge A. Zaitsev (jsmn)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Sollumz/szio
+============
+
+The MIT License (MIT)
+
+Copyright (c) 2025 Sollumz contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
